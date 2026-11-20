@@ -11,7 +11,7 @@ scale anything, we have to decide what a molecule *is* inside our systems.
 By the end of this module you will be able to:
 
 - read a molecule into RDKit and walk through its atoms and bonds;
-- write a molecule as matrices: adjacency, bond orders, distances and atom features;
+- write a molecule as matrices with NetworkX, and encode atom and bond properties in them;
 - explain why one molecule has many SMILES but one canonical SMILES;
 - tell what a representation keeps and what it loses (stereochemistry, aromaticity, tautomers);
 - use InChIKey as a molecule's identity, and SMARTS as a search pattern;
@@ -46,8 +46,9 @@ atom 3: O, bonded to [1, 4]
 atom 4: C, bonded to [3, 5, 9]
 ```
 
-The same molecule as a plain graph, the way a graph library or a graph database sees it: nodes
-carry the element, edges carry the bond order.
+The same molecule as a plain graph in NetworkX, the way a graph library or a graph database sees it.
+Every node carries the atom's properties and every edge the bond's; the next section turns them
+into numbers.
 
 ![Aspirin as a graph: atoms as circles, bonds as lines](figures/aspirin-graph.svg)
 
@@ -56,12 +57,23 @@ import networkx as nx
 
 
 def to_graph(mol):
-    """A molecule as a NetworkX graph: atoms as nodes, bonds as edges."""
+    """A molecule as a NetworkX graph: atoms as nodes, bonds as edges, each with its properties."""
     g = nx.Graph()
     for atom in mol.GetAtoms():
-        g.add_node(atom.GetIdx(), element=atom.GetSymbol())
+        g.add_node(
+            atom.GetIdx(),
+            element=atom.GetSymbol(),
+            hydrogens=atom.GetTotalNumHs(),
+            charge=atom.GetFormalCharge(),
+            aromatic=atom.GetIsAromatic(),
+        )
     for bond in mol.GetBonds():
-        g.add_edge(bond.GetBeginAtomIdx(), bond.GetEndAtomIdx(), order=str(bond.GetBondType()))
+        g.add_edge(
+            bond.GetBeginAtomIdx(),
+            bond.GetEndAtomIdx(),
+            bond_type=str(bond.GetBondType()),
+            order=bond.GetBondTypeAsDouble(),
+        )
     return g
 
 
@@ -81,20 +93,24 @@ back to this when we store molecules in a graph database.
 
 ## 2. Molecules as matrices
 
-The same graph can be written as matrices, which is how many algorithms, and graph neural networks
-in particular, see a molecule. The **adjacency matrix** has one row and one column per atom, with a
-1 where two atoms are bonded. Here it is for acetic acid, with each atom labelled by element and
-index:
+Algorithms, and graph neural networks in particular, see a molecule as matrices. NetworkX builds
+them straight from the graph. The **adjacency matrix** has one row and one column per atom, with a
+1 where two atoms are bonded. Here it is for acetic acid, each atom labelled by element and index,
+checked against RDKit's own:
 
 ```python
+import numpy as np
 import pandas as pd
 
 acetic_acid = Chem.MolFromSmiles("CC(=O)O")
-labels = [f"{atom.GetSymbol()}{atom.GetIdx()}" for atom in acetic_acid.GetAtoms()]
-adjacency = Chem.GetAdjacencyMatrix(acetic_acid)
+g = to_graph(acetic_acid)
+atoms = sorted(g)
+labels = [f"{g.nodes[i]['element']}{i}" for i in atoms]
+adjacency = nx.to_numpy_array(g, nodelist=atoms, weight=None, dtype=int)
 print(pd.DataFrame(adjacency, index=labels, columns=labels))
 print("symmetric:", bool((adjacency == adjacency.T).all()))
 print("bonds per atom (row sums):", adjacency.sum(axis=1).tolist())
+print("same as RDKit's:", bool((adjacency == Chem.GetAdjacencyMatrix(acetic_acid)).all()))
 ```
 ```output
     C0  C1  O2  O3
@@ -104,13 +120,25 @@ O2   0   1   0   0
 O3   0   1   0   0
 symmetric: True
 bonds per atom (row sums): [1, 3, 1, 1]
+same as RDKit's: True
 ```
 
 Bonds have no direction, so the matrix is symmetric, and each row adds up to the number of bonds
-that atom makes (its degree). Ask for bond orders and the 1s become 1, 1.5 (aromatic), 2 or 3:
+that atom makes (its degree). For aspirin the matrix is 13 by 13 and mostly zeros: each atom is
+bonded to only a few others.
+
+![Aspirin's adjacency matrix as a grid: a coloured square wherever two atoms are bonded, darker for double and aromatic bonds](figures/aspirin-adjacency.svg)
+
+### Encoding a molecule's properties
+
+A plain adjacency matrix says only *which* atoms are bonded. Chemistry needs more: what each atom
+is, and what kind each bond is. There are four standard ways to put those properties into numbers.
+
+**1. Weights in the matrix.** Put a number in each cell instead of a 1. With the bond order as the
+weight, the cells read 1, 1.5 (aromatic), 2 or 3:
 
 ```python
-orders = Chem.GetAdjacencyMatrix(acetic_acid, useBO=True)
+orders = nx.to_numpy_array(g, nodelist=atoms, weight="order")
 print(pd.DataFrame(orders, index=labels, columns=labels))
 ```
 ```output
@@ -121,58 +149,111 @@ O2  0.0  2.0  0.0  0.0
 O3  0.0  1.0  0.0  0.0
 ```
 
-For aspirin the matrix is 13 by 13 and mostly zeros: each atom is bonded to only a few others.
+One number per cell can carry one property only, so the other properties go beside the matrix.
 
-![Aspirin's adjacency matrix as a grid: a coloured square wherever two atoms are bonded, darker for double and aromatic bonds](figures/aspirin-adjacency.svg)
-
-The **distance matrix** counts the bonds on the shortest path between every pair of atoms, the same
-answer the graph gave above:
+**2. An atom feature matrix.** One row per atom, one column per property. Numbers (charge,
+hydrogens) go in as numbers; categories (the element) are **one-hot encoded**, one column per
+category with a 1 in the right one, so that a model never reads "oxygen = 8" as "more than carbon":
 
 ```python
-distances = Chem.GetDistanceMatrix(aspirin)
+ELEMENTS = ["C", "N", "O"]
+
+
+def atom_features(data):
+    element = [int(data["element"] == e) for e in ELEMENTS]
+    other = int(data["element"] not in ELEMENTS)
+    return [*element, other, data["hydrogens"], data["charge"], int(data["aromatic"])]
+
+
+columns = [*ELEMENTS, "other", "hydrogens", "charge", "aromatic"]
+X = np.array([atom_features(g.nodes[i]) for i in atoms])
+print(pd.DataFrame(X, index=labels, columns=columns))
+```
+```output
+    C  N  O  other  hydrogens  charge  aromatic
+C0  1  0  0      0          3       0         0
+C1  1  0  0      0          0       0         0
+O2  0  0  1      0          0       0         0
+O3  0  0  1      0          1       0         0
+```
+
+**3. A bond tensor: one adjacency matrix per bond type.** Stack one matrix for single bonds, one
+for double, one for triple, one for aromatic. Each "layer" is an ordinary adjacency matrix, and
+together they say exactly which kind of bond joins which atoms:
+
+```python
+BOND_TYPES = ["SINGLE", "DOUBLE", "TRIPLE", "AROMATIC"]
+tensor = np.zeros((len(BOND_TYPES), len(atoms), len(atoms)), dtype=int)
+for i, j, data in g.edges(data=True):
+    k = BOND_TYPES.index(data["bond_type"])
+    tensor[k, i, j] = tensor[k, j, i] = 1
+for name, layer in zip(BOND_TYPES[:2], tensor[:2], strict=True):
+    print(f"{name} bonds:")
+    print(pd.DataFrame(layer, index=labels, columns=labels))
+print("shape of the bond tensor (types, atoms, atoms):", tensor.shape)
+```
+```output
+SINGLE bonds:
+    C0  C1  O2  O3
+C0   0   1   0   0
+C1   1   0   0   1
+O2   0   0   0   0
+O3   0   1   0   0
+DOUBLE bonds:
+    C0  C1  O2  O3
+C0   0   0   0   0
+C1   0   0   1   0
+O2   0   1   0   0
+O3   0   0   0   0
+shape of the bond tensor (types, atoms, atoms): (4, 4, 4)
+```
+
+**4. An edge list with edge features.** Instead of n-by-n matrices, list each bond once in each
+direction, with a row of features per entry. This is what graph neural network libraries take: it
+grows with the bonds, not with the square of the atoms:
+
+```python
+pairs = [(i, j) for i, j in g.edges()] + [(j, i) for i, j in g.edges()]
+edge_index = np.array(pairs).T
+edge_features = np.array([[int(g.edges[i, j]["bond_type"] == t) for t in BOND_TYPES] for i, j in pairs])
+print("edge index (from, to):")
+print(edge_index)
+print("edge features (one-hot bond type):")
+print(pd.DataFrame(edge_features, columns=BOND_TYPES, index=[f"{i}-{j}" for i, j in pairs]))
+```
+```output
+edge index (from, to):
+[[0 1 1 1 2 3]
+ [1 2 3 0 1 1]]
+edge features (one-hot bond type):
+     SINGLE  DOUBLE  TRIPLE  AROMATIC
+0-1       1       0       0         0
+1-2       0       1       0         0
+1-3       1       0       0         0
+1-0       1       0       0         0
+2-1       0       1       0         0
+3-1       1       0       0         0
+```
+
+Together, the atom feature matrix `X` and either the bond tensor or the edge list with its features
+describe the whole molecule as numbers. The MLOps track builds models on exactly these.
+
+### Distances
+
+The **distance matrix** counts the bonds on the shortest path between every pair of atoms.
+NetworkX and RDKit give the same answer:
+
+```python
+aspirin_graph = to_graph(aspirin)
+distances = nx.floyd_warshall_numpy(aspirin_graph, nodelist=sorted(aspirin_graph))
 print("bonds between the two carbonyl carbons:", int(distances[1, 10]))
 print("the two atoms furthest apart are", int(distances.max()), "bonds apart")
+print("same as RDKit's:", bool((distances == Chem.GetDistanceMatrix(aspirin)).all()))
 ```
 ```output
 bonds between the two carbonyl carbons: 4
 the two atoms furthest apart are 6 bonds apart
-```
-
-A model also needs to know what each atom *is*. An **atom feature matrix** has one row per atom and
-one column per property; together with the adjacency matrix it is the usual input to a graph neural
-network (the MLOps track returns to this):
-
-```python
-features = pd.DataFrame(
-    [
-        {
-            "atom": f"{atom.GetSymbol()}{atom.GetIdx()}",
-            "atomic_number": atom.GetAtomicNum(),
-            "degree": atom.GetDegree(),
-            "hydrogens": atom.GetTotalNumHs(),
-            "aromatic": int(atom.GetIsAromatic()),
-        }
-        for atom in aspirin.GetAtoms()
-    ]
-)
-print(features.head(6).to_string(index=False))
-print(
-    "aspirin as matrices:",
-    Chem.GetAdjacencyMatrix(aspirin).shape,
-    "adjacency,",
-    features.drop(columns="atom").shape,
-    "atom features",
-)
-```
-```output
-atom  atomic_number  degree  hydrogens  aromatic
-  C0              6       1          3         0
-  C1              6       3          0         0
-  O2              8       1          0         0
-  O3              8       2          0         0
-  C4              6       3          0         1
-  C5              6       2          1         1
-aspirin as matrices: (13, 13) adjacency, (13, 4) atom features
+same as RDKit's: True
 ```
 
 Matrices are convenient for computation but wasteful for storage: an adjacency matrix grows with
