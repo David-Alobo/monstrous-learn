@@ -11,7 +11,8 @@ scale anything, we have to decide what a molecule *is* inside our systems.
 By the end of this module you will be able to:
 
 - read a molecule into RDKit and walk through its atoms and bonds;
-- write a molecule as matrices with NetworkX, and encode atom and bond properties in them;
+- write a molecule as matrices with NetworkX, encode atom and bond properties in them, and compute
+  on them with NumPy;
 - explain why one molecule has many SMILES but one canonical SMILES;
 - tell what a representation keeps and what it loses (stereochemistry, aromaticity, tautomers);
 - use InChIKey as a molecule's identity, and SMARTS as a search pattern;
@@ -254,6 +255,70 @@ print("same as RDKit's:", bool((distances == Chem.GetDistanceMatrix(aspirin)).al
 bonds between the two carbonyl carbons: 4
 the two atoms furthest apart are 6 bonds apart
 same as RDKit's: True
+```
+
+### Graph operations with NumPy
+
+Once a molecule is a matrix, graph questions become arithmetic. With aspirin's adjacency matrix
+`A`, row sums give each atom's degree and the non-zero entries of a row are its neighbours. Squaring
+the matrix counts routes: `(A @ A)[i, j]` is the number of two-bond walks from atom `i` to atom `j`,
+and its diagonal gives the degrees back:
+
+```python
+A = nx.to_numpy_array(aspirin_graph, nodelist=sorted(aspirin_graph), weight=None, dtype=int)
+print("degrees:", A.sum(axis=1).tolist())
+print("neighbours of atom 4:", np.nonzero(A[4])[0].tolist())
+A2 = A @ A
+print("two-bond walks from atom 1 to atom 4:", int(A2[1, 4]))
+print("diagonal of A @ A equals the degrees:", bool((np.diag(A2) == A.sum(axis=1)).all()))
+```
+```output
+degrees: [1, 3, 1, 2, 3, 2, 2, 2, 2, 3, 3, 1, 1]
+neighbours of atom 4: [3, 5, 9]
+two-bond walks from atom 1 to atom 4: 1
+diagonal of A @ A equals the degrees: True
+```
+
+Multiplying the adjacency matrix by the atom feature matrix adds up each atom's neighbours'
+features: after one step, every atom "knows" what it is bonded to. This is one round of **message
+passing**, the core operation of graph neural networks, and the same idea a Morgan fingerprint uses
+when it grows each atom's environment one bond at a time:
+
+```python
+aspirin_atoms = sorted(aspirin_graph)
+aspirin_labels = [f"{aspirin_graph.nodes[i]['element']}{i}" for i in aspirin_atoms]
+X_aspirin = np.array([atom_features(aspirin_graph.nodes[i]) for i in aspirin_atoms])
+messages = A @ X_aspirin
+print(pd.DataFrame(messages, index=aspirin_labels, columns=columns).head(5))
+```
+```output
+    C  N  O  other  hydrogens  charge  aromatic
+C0  1  0  0      0          0       0         0
+C1  1  0  2      0          3       0         0
+O2  1  0  0      0          0       0         0
+O3  2  0  0      0          0       0         1
+C4  2  0  1      0          1       0         2
+```
+
+Atom 1, the acetyl carbon, receives one carbon and two oxygens from its neighbours; atom 4 receives
+two aromatic carbons and an oxygen.
+
+The **graph Laplacian**, `L = D - A` (the degrees on the diagonal minus the adjacency matrix), has
+one zero eigenvalue for every separate piece of a graph. A record of sodium acetate holds two pieces,
+the acetate and the sodium ion, and the arithmetic finds both, a check Module 5 uses to spot salts
+and mixtures:
+
+```python
+salt = Chem.MolFromSmiles("CC(=O)[O-].[Na+]")
+A_salt = Chem.GetAdjacencyMatrix(salt)
+laplacian = np.diag(A_salt.sum(axis=1)) - A_salt
+eigenvalues = np.linalg.eigvalsh(laplacian)
+print("Laplacian eigenvalues:", (np.round(eigenvalues, 3) + 0.0).tolist())  # + 0.0 turns -0.0 into 0.0
+print("pieces:", int(np.isclose(eigenvalues, 0).sum()), " RDKit agrees:", len(Chem.GetMolFrags(salt)))
+```
+```output
+Laplacian eigenvalues: [0.0, 0.0, 1.0, 1.0, 4.0]
+pieces: 2  RDKit agrees: 2
 ```
 
 Matrices are convenient for computation but wasteful for storage: an adjacency matrix grows with
