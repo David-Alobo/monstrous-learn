@@ -3,7 +3,9 @@ packages it uses, uses only figures that exist, ends with further reading, and i
 and README are up to date."""
 
 import ast
+import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -27,9 +29,32 @@ LOCAL = {p.stem for p in HERE.glob("*.py")}
 STDLIB = set(sys.stdlib_module_names)
 
 
+def run_fresh(lesson: Path) -> list:
+    """Run a lesson in a fresh Python process, as a learner would, and return lessonkit's results.
+
+    Each lesson gets its own interpreter, so nothing one lesson imports, caches or changes can
+    affect another.
+    """
+    code = "\n".join(
+        [
+            "import json, pathlib, lessonkit",
+            f"p = pathlib.Path({str(lesson)!r})",
+            "r = lessonkit.run(p.read_text(encoding='utf-8'), p.parent)",
+            "pathlib.Path(p.parent, 'work').mkdir(exist_ok=True)",
+            "pathlib.Path(p.parent, 'work', 'lessonkit-results.json').write_text(json.dumps(r))",
+        ]
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", code], cwd=HERE, capture_output=True, text=True, encoding="utf-8"
+    )
+    assert done.returncode == 0, done.stderr[-3000:]
+    results = lesson.parent / "work" / "lessonkit-results.json"
+    return json.loads(results.read_text(encoding="utf-8"))
+
+
 @pytest.mark.parametrize("lesson", LESSONS, **ids)
 def test_every_output_is_what_the_code_prints(lesson):
-    results = lessonkit.run(lesson.read_text(encoding="utf-8"), lesson.parent)
+    results = run_fresh(lesson)
     assert results, "a lesson without code"
     for k, (printed, shown, kind) in enumerate(results, start=1):
         if printed is None:

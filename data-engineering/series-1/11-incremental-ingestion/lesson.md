@@ -2,6 +2,7 @@
 title: Incremental ingestion from ChEMBL and PubChem
 summary: Fetch only what changed from public chemistry APIs, page through them politely within their limits, check every response against a model, load idempotently with a high-water mark, run backfills safely, and keep the licence with the data.
 requires: requests, tenacity, pydantic, duckdb, pandas
+files: recorded/*.json
 ---
 
 Most chemical data a company uses is not made in-house. Bioactivity values come from ChEMBL,

@@ -79,8 +79,8 @@ print(f"{len(smiles):,} molecules in {serial_seconds:.1f} s, {per_molecule * 1e6
 print(f"all {chemlib.size():,} would take about {chemlib.size() * per_molecule / 60:.0f} minutes")
 ```
 ```output varies
-12,000 molecules in 6.6 s, 548 µs each
-all 1,733,400 would take about 16 minutes
+12,000 molecules in 2.8 s, 234 µs each
+all 1,733,400 would take about 7 minutes
 ```
 
 ## 2. Several cores with joblib
@@ -135,8 +135,8 @@ for n_jobs in [2, 4]:
     print(f"n_jobs={n_jobs}: {seconds:.1f} s, {speed_up[n_jobs]:.1f} times the serial speed")
 ```
 ```output varies
-n_jobs=2: 2.9 s, 2.3 times the serial speed
-n_jobs=4: 1.6 s, 4.1 times the serial speed
+n_jobs=2: 1.4 s, 2.0 times the serial speed
+n_jobs=4: 0.8 s, 3.5 times the serial speed
 ```
 
 The speed-up grows with the workers but falls short of the number of workers, and the gap widens
@@ -220,9 +220,9 @@ for size in [5, 1_500, 6_000]:
     print(f"chunks of {size:>5,}: {len(pieces):>5,} tasks, {time.perf_counter() - start:.1f} s")
 ```
 ```output varies
-chunks of     5: 2,400 tasks, 2.6 s
-chunks of 1,500:     8 tasks, 1.6 s
-chunks of 6,000:     2 tasks, 2.9 s
+chunks of     5: 2,400 tasks, 1.4 s
+chunks of 1,500:     8 tasks, 0.7 s
+chunks of 6,000:     2 tasks, 1.4 s
 ```
 
 Thousands of tiny tasks spend part of their time on the overheads, and 2 chunks of 6,000 keep only
@@ -292,7 +292,7 @@ print(f"40 look-ups one by one: {waited:.1f} s; with 8 threads: {time.perf_count
 print("same results:", threaded == one_by_one)
 ```
 ```output varies
-40 look-ups one by one: 2.0 s; with 8 threads: 0.3 s
+40 look-ups one by one: 2.2 s; with 8 threads: 0.3 s
 same results: True
 ```
 

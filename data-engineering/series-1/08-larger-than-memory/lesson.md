@@ -104,7 +104,7 @@ print(f"{len(molecules):,} RDKit molecules: about {(after - before) / 1e6:.0f} M
       f"{per_molecule:,.0f} bytes each")
 ```
 ```output varies
-20,000 RDKit molecules: about 646 MB, 32,308 bytes each
+20,000 RDKit molecules: about 645 MB, 32,249 bytes each
 ```
 
 A 2048-bit Morgan fingerprint stored as one byte per bit, the way many machine-learning examples
@@ -283,8 +283,8 @@ for name, peak in peaks.items():
     print(f"{name:16} peak {peak / 1e6:5.0f} MB above the start")
 ```
 ```output varies
-stream           peak     9 MB above the start
-load everything  peak    43 MB above the start
+stream           peak     7 MB above the start
+load everything  peak    44 MB above the start
 ```
 
 Both files hold the same rows; only the memory needed to make them differs:

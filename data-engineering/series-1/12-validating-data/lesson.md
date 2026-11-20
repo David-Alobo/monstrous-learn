@@ -805,10 +805,10 @@ print(f"for a million rows: about {record_route * per_million:.1f} s one record 
       f"{pandera_s * per_million:.1f} s as a table ({record_route / pandera_s:.0f} times faster)")
 ```
 ```output varies
-rows to dictionaries:          0.95 s
-Pydantic, one record at a time: 1.29 s (6.4 microseconds per record)
-Pandera, one pass over the table: 0.36 s
-for a million rows: about 11.2 s one record at a time, 1.8 s as a table (6 times faster)
+rows to dictionaries:          1.01 s
+Pydantic, one record at a time: 1.06 s (5.3 microseconds per record)
+Pandera, one pass over the table: 0.13 s
+for a million rows: about 10.3 s one record at a time, 0.6 s as a table (16 times faster)
 ```
 
 Pydantic's core is written in Rust and is fast for what it does: a few microseconds per record

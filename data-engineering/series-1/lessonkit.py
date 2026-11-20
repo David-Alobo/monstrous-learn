@@ -33,6 +33,7 @@ import json
 import os
 import re
 import sys
+import types
 from pathlib import Path
 
 FENCE = re.compile(r"```(python|output varies|output)\n(.*?)```\n", re.S)
@@ -108,7 +109,16 @@ def run(text: str, folder: Path) -> list[tuple[str | None, str | None, str]]:
         (or None), and that block's kind ("output", "output varies", or "" if there is none).
     """
     found = blocks(text)
-    namespace: dict = {"__name__": "__lesson__"}
+    # the lesson runs as a real module, registered like any imported one, so that code which looks
+    # itself up (dataclasses, pickling for worker processes) works as it does in a script
+    module = types.ModuleType("__lesson__")
+    sys.modules["__lesson__"] = module
+    namespace = module.__dict__
+    # the same import path a learner's code.py sets up: the course's helpers (chemlib, in the
+    # series folder) and the module's own files (e.g. workers.py)
+    for path in (folder.resolve().parent, folder.resolve()):
+        if str(path) not in sys.path:
+            sys.path.insert(0, str(path))
     results = []
     here = os.getcwd()
     os.chdir(folder)
@@ -271,12 +281,25 @@ def export(folder: Path) -> dict[Path, str]:
     # the course's own helpers (chemlib) and this module's (e.g. workers.py) come with the
     # repository; outside it (in Colab), fetch them
     local = helpers(folder, body)
-    if local:
+    # data files the lesson reads from its folder (front matter "files:", e.g. recorded/*.json)
+    data = sorted(
+        p.relative_to(folder).as_posix()
+        for pattern in listed(meta, "files")
+        for p in folder.glob(pattern)
+        if p.is_file()
+    )
+    if local or data:
         install += "\n\nimport pathlib\nimport urllib.request\n"
         for name, url in local:
             install += (
                 f'if not pathlib.Path("{name}.py").exists():\n'
                 f'    urllib.request.urlretrieve("{url}", "{name}.py")\n'
+            )
+        for rel in data:
+            install += (
+                f'if not pathlib.Path("{rel}").exists():\n'
+                f'    pathlib.Path("{rel}").parent.mkdir(parents=True, exist_ok=True)\n'
+                f'    urllib.request.urlretrieve("{RAW}/{folder.name}/{rel}", "{rel}")\n'
             )
     cells = [
         md_cell(f"# {title}\n\n{summary}\n\nThe lesson's page: {page}"),

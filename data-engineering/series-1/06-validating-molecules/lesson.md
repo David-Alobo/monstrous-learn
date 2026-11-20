@@ -65,7 +65,7 @@ for kind, row in dirty[dirty["defect"] != ""].groupby("defect").head(1).iterrows
 ```
 ```output
 valence    C(C)(C)(C)(C)c1cc(Cl)c(nc1)Nc2nc(N8CCOCC8)c(c8cn[nH]c8)c(Br)n2
-duplicate  S(=O)(C)(c1cc(C(NC(CN2CCOCC2)C(=O)NC)=O)ccc1)=O
+duplicate  S(=O)(c1cccc(c1)C(NC(C(NC)=O)CN1CCOCC1)=O)(=O)C
 solvent    c1cc(c8cn[nH]c8)c(nc1)Nc2nc(c8ccc(F)cc8)c(C(=O)N)c(N(C)C)n2.CCO
 element    c1c(c8ccc(F)cc8)cc(cc1c8ccco8)[Se](=O)NC(CC)C(=O)NO
 salt       c1cc(c8ccco8)c(nc1)Nc2nc(C(=O)C)c(O)c(CN)n2.Cl

@@ -693,7 +693,7 @@ print(json.dumps(record, indent=2))
     "file": "median-price.csv",
     "sha256": "d078fc3080aeffd7f35220c8d32b0a251cdfe40385646db73d89b50a3dd76e7c"
   },
-  "code_version": "v1.0.0-1-g9738eb3",
+  "code_version": "v1.0.0-1-g51a03c3",
   "environment": {
     "python": "3.11.17",
     "pandas": "3.1.1",
@@ -712,7 +712,7 @@ print(json.dumps(record, indent=2))
   "parameters": {
     "min_stock_mg": 100
   },
-  "created_utc": "2026-11-20T05:46:22+00:00"
+  "created_utc": "2026-11-20T06:27:01+00:00"
 }
 ```
 

@@ -164,10 +164,10 @@ for name, reader in readers.items():
     print(f"{name:11} {seconds:6.3f} s  {len(tables[name]):,} rows")
 ```
 ```output varies
-SDF         10.094 s  20,000 rows
-SMILES       0.068 s  20,000 rows
-CSV          0.046 s  20,000 rows
-Parquet      0.073 s  20,000 rows
+SDF         14.654 s  20,000 rows
+SMILES       0.042 s  20,000 rows
+CSV          0.044 s  20,000 rows
+Parquet      0.187 s  20,000 rows
 ```
 
 Reading the SDF is about a hundred times slower, or more, because every record has to be parsed
@@ -625,9 +625,9 @@ rows sharing a SMILES string with another row: 0
 rows sharing an InChIKey with another row:     68
 every added duplicate found: True
 rows that are an added duplicate or its original: 60
-             id                                                 smiles                    inchikey
-ML-00911844-dup c1c(cc(cc1C(NC(Cc1ccncc1)C(=O)NC1CCNCC1)=O)C(F)(F)F)CO JQHQCTSCMYNCGE-UHFFFAOYSA-N
-    ML-00911844 c1c(CO)cc(cc1C(F)(F)F)C(=O)NC(Cc8ccncc8)C(=O)NC8CCNCC8 JQHQCTSCMYNCGE-UHFFFAOYSA-N
+             id                                                   smiles                    inchikey
+ML-00911844-dup C(c1cc(C(F)(F)F)cc(c1)C(NC(C(=O)NC1CCNCC1)Cc1ccncc1)=O)O JQHQCTSCMYNCGE-UHFFFAOYSA-N
+    ML-00911844   c1c(CO)cc(cc1C(F)(F)F)C(=O)NC(Cc8ccncc8)C(=O)NC8CCNCC8 JQHQCTSCMYNCGE-UHFFFAOYSA-N
 ```
 
 Two SMILES that look nothing alike give one key. Of the 68 rows that share a key, 60 are the 30

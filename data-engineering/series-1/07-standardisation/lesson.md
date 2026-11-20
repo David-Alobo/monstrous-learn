@@ -565,8 +565,8 @@ print(f"without tautomers: {1000 * (middle - start) / len(tautomer_sample):.1f} 
 print(f"with tautomers:    {1000 * (end - middle) / len(tautomer_sample):.1f} ms per molecule")
 ```
 ```output varies
-without tautomers: 6.4 ms per molecule
-with tautomers:    13.4 ms per molecule
+without tautomers: 4.2 ms per molecule
+with tautomers:    14.2 ms per molecule
 ```
 
 Here the tautomer step more than doubled the time per molecule. Then, what it changed, and how many

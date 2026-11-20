@@ -213,7 +213,10 @@ def add_defects(df: pd.DataFrame, rate: float = 0.05, seed: int = 0) -> pd.DataF
             mol = Chem.MolFromSmiles(smi)
             dup = out.loc[row].copy()
             dup["id"] = f"{dup['id']}-dup"
-            dup["smiles"] = Chem.MolToSmiles(mol, canonical=False, doRandom=True)
+            # a different, valid SMILES of the same molecule; seeded, so the same every run
+            # (MolToSmiles(doRandom=True) uses RDKit's own unseeded random generator)
+            random_seed = (seed * 100_003 + k) % 2**31
+            dup["smiles"] = Chem.MolToRandomSmilesVect(mol, 1, randomSeed=random_seed)[0]
             dup["defect"] = "duplicate"
             extra.append(dup)
             continue
