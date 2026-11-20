@@ -91,6 +91,53 @@ def aspirin_graph() -> str:
     return "".join(parts) + "</svg>"
 
 
+def aspirin_adjacency() -> str:
+    """Aspirin's adjacency matrix as a grid, coloured by bond order, from RDKit's own matrix."""
+    mol = Chem.MolFromSmiles(ASPIRIN)
+    orders = Chem.GetAdjacencyMatrix(mol, useBO=True)
+    labels = [f"{a.GetSymbol()}{a.GetIdx()}" for a in mol.GetAtoms()]
+    n, cell, left, top = len(labels), 30, 56, 48
+    colour = {1.0: "#b7a6f6", 1.5: "#7c5cf0", 2.0: "#3f1fb8"}
+    w, h = left + n * cell + 210, top + n * cell + 20
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}">',
+        f'<rect width="{w}" height="{h}" fill="#ffffff"/>',
+    ]
+    for k, label in enumerate(labels):
+        fill = ELEMENT.get(label[0], INK)
+        parts.append(
+            f'<text x="{left - 8}" y="{top + k * cell + 20}" font-family="sans-serif" '
+            f'font-size="12" text-anchor="end" fill="{fill}">{label}</text>'
+            f'<text x="{left + k * cell + 15}" y="{top - 10}" font-family="sans-serif" '
+            f'font-size="12" text-anchor="middle" fill="{fill}">{label}</text>'
+        )
+    for i in range(n):
+        for j in range(n):
+            fill = colour.get(float(orders[i][j]), "#f1f2f6")
+            parts.append(
+                f'<rect x="{left + j * cell + 1}" y="{top + i * cell + 1}" width="{cell - 2}" '
+                f'height="{cell - 2}" rx="3" fill="{fill}"/>'
+            )
+    key = [("single bond", 1.0), ("aromatic bond", 1.5), ("double bond", 2.0)]
+    kx = left + n * cell + 24
+    for k, (label, order) in enumerate(key):
+        parts.append(
+            f'<rect x="{kx}" y="{top + 8 + k * 26}" width="16" height="16" rx="3" '
+            f'fill="{colour[order]}"/><text x="{kx + 24}" y="{top + 21 + k * 26}" '
+            f'font-family="sans-serif" font-size="13" fill="{INK}">{label}</text>'
+        )
+    parts.append(
+        f'<rect x="{kx}" y="{top + 86}" width="16" height="16" rx="3" fill="#f1f2f6"/>'
+        f'<text x="{kx + 24}" y="{top + 99}" font-family="sans-serif" font-size="13" '
+        f'fill="{INK}">not bonded</text>'
+        f'<text x="{kx}" y="{top + 136}" font-family="sans-serif" font-size="12" '
+        f'fill="{MUTED}">{n} x {n} = {n * n} cells,</text>'
+        f'<text x="{kx}" y="{top + 152}" font-family="sans-serif" font-size="12" '
+        f'fill="{MUTED}">{mol.GetNumBonds()} bonds, each in 2 cells</text>'
+    )
+    return "".join(parts) + "</svg>"
+
+
 def ibuprofen_enantiomers() -> str:
     """The two enantiomers of ibuprofen, with RDKit's own R/S labels."""
     smiles = ["CC(C)Cc1ccc(cc1)[C@H](C)C(=O)O", "CC(C)Cc1ccc(cc1)[C@@H](C)C(=O)O"]
@@ -163,6 +210,7 @@ def main() -> None:
     figures = {
         "aspirin-atoms": aspirin_atoms,
         "aspirin-graph": aspirin_graph,
+        "aspirin-adjacency": aspirin_adjacency,
         "ibuprofen-enantiomers": ibuprofen_enantiomers,
         "smarts-acid": smarts_acid,
         "fingerprint-bits": fingerprint_bits,

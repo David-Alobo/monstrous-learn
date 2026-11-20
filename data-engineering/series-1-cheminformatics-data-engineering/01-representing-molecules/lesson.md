@@ -11,6 +11,7 @@ scale anything, we have to decide what a molecule *is* inside our systems.
 By the end of this module you will be able to:
 
 - read a molecule into RDKit and walk through its atoms and bonds;
+- write a molecule as matrices: adjacency, bond orders, distances and atom features;
 - explain why one molecule has many SMILES but one canonical SMILES;
 - tell what a representation keeps and what it loses (stereochemistry, aromaticity, tautomers);
 - use InChIKey as a molecule's identity, and SMARTS as a search pattern;
@@ -78,7 +79,107 @@ bonds between the two carbonyl carbons: 4
 Graph questions (rings, paths, which atoms are connected) are chemistry questions. Module 4 comes
 back to this when we store molecules in a graph database.
 
-## 2. SMILES: one molecule, many strings
+## 2. Molecules as matrices
+
+The same graph can be written as matrices, which is how many algorithms, and graph neural networks
+in particular, see a molecule. The **adjacency matrix** has one row and one column per atom, with a
+1 where two atoms are bonded. Here it is for acetic acid, with each atom labelled by element and
+index:
+
+```python
+import pandas as pd
+
+acetic_acid = Chem.MolFromSmiles("CC(=O)O")
+labels = [f"{atom.GetSymbol()}{atom.GetIdx()}" for atom in acetic_acid.GetAtoms()]
+adjacency = Chem.GetAdjacencyMatrix(acetic_acid)
+print(pd.DataFrame(adjacency, index=labels, columns=labels))
+print("symmetric:", bool((adjacency == adjacency.T).all()))
+print("bonds per atom (row sums):", adjacency.sum(axis=1).tolist())
+```
+```output
+    C0  C1  O2  O3
+C0   0   1   0   0
+C1   1   0   1   1
+O2   0   1   0   0
+O3   0   1   0   0
+symmetric: True
+bonds per atom (row sums): [1, 3, 1, 1]
+```
+
+Bonds have no direction, so the matrix is symmetric, and each row adds up to the number of bonds
+that atom makes (its degree). Ask for bond orders and the 1s become 1, 1.5 (aromatic), 2 or 3:
+
+```python
+orders = Chem.GetAdjacencyMatrix(acetic_acid, useBO=True)
+print(pd.DataFrame(orders, index=labels, columns=labels))
+```
+```output
+     C0   C1   O2   O3
+C0  0.0  1.0  0.0  0.0
+C1  1.0  0.0  2.0  1.0
+O2  0.0  2.0  0.0  0.0
+O3  0.0  1.0  0.0  0.0
+```
+
+For aspirin the matrix is 13 by 13 and mostly zeros: each atom is bonded to only a few others.
+
+![Aspirin's adjacency matrix as a grid: a coloured square wherever two atoms are bonded, darker for double and aromatic bonds](figures/aspirin-adjacency.svg)
+
+The **distance matrix** counts the bonds on the shortest path between every pair of atoms, the same
+answer the graph gave above:
+
+```python
+distances = Chem.GetDistanceMatrix(aspirin)
+print("bonds between the two carbonyl carbons:", int(distances[1, 10]))
+print("the two atoms furthest apart are", int(distances.max()), "bonds apart")
+```
+```output
+bonds between the two carbonyl carbons: 4
+the two atoms furthest apart are 6 bonds apart
+```
+
+A model also needs to know what each atom *is*. An **atom feature matrix** has one row per atom and
+one column per property; together with the adjacency matrix it is the usual input to a graph neural
+network (the MLOps track returns to this):
+
+```python
+features = pd.DataFrame(
+    [
+        {
+            "atom": f"{atom.GetSymbol()}{atom.GetIdx()}",
+            "atomic_number": atom.GetAtomicNum(),
+            "degree": atom.GetDegree(),
+            "hydrogens": atom.GetTotalNumHs(),
+            "aromatic": int(atom.GetIsAromatic()),
+        }
+        for atom in aspirin.GetAtoms()
+    ]
+)
+print(features.head(6).to_string(index=False))
+print(
+    "aspirin as matrices:",
+    Chem.GetAdjacencyMatrix(aspirin).shape,
+    "adjacency,",
+    features.drop(columns="atom").shape,
+    "atom features",
+)
+```
+```output
+atom  atomic_number  degree  hydrogens  aromatic
+  C0              6       1          3         0
+  C1              6       3          0         0
+  O2              8       1          0         0
+  O3              8       2          0         0
+  C4              6       3          0         1
+  C5              6       2          1         1
+aspirin as matrices: (13, 13) adjacency, (13, 4) atom features
+```
+
+Matrices are convenient for computation but wasteful for storage: an adjacency matrix grows with
+the square of the number of atoms, while a list of bonds grows only with the bonds. Store the
+molecule (or its bond list) and build matrices when an algorithm needs them.
+
+## 3. SMILES: one molecule, many strings
 
 SMILES writes the graph as a line of text by walking through it. There are many valid walks, so
 one molecule has many SMILES. RDKit's **canonical SMILES** always picks the same one, which makes
@@ -98,7 +199,7 @@ C(O)C            -> CCO
 
 Canonical means canonical *for one toolkit and version*: another program, or another RDKit
 release, may choose a different canonical form. That is why a database needs an identity that does
-not depend on the toolkit (section 4).
+not depend on the toolkit (section 5).
 
 **Aromaticity** is a choice too. Benzene can be written with alternating double bonds (Kekulé) or
 with aromatic lower-case atoms; RDKit perceives the aromatic form when it reads the molecule:
@@ -117,7 +218,7 @@ kekulised:  C1=CC=CC=C1
 Different toolkits perceive aromaticity by different rules, so the same file can give different
 aromatic forms in different programs: one more reason to standardise before storing (Module 6).
 
-## 3. What a representation can lose: stereochemistry
+## 4. What a representation can lose: stereochemistry
 
 Ibuprofen has one stereocentre. The two mirror images (enantiomers) are different molecules with
 different biology, and isomeric SMILES keeps them apart with `@` and `@@`:
@@ -155,7 +256,7 @@ flat: CC(C)Cc1ccc(C(C)C(=O)O)cc1
 Store the flat form and your database silently merges two different drugs. Sometimes that is what
 you want (grouping a racemate with its enantiomers), but it must be a decision, never an accident.
 
-## 4. InChI and InChIKey: an identity for every molecule
+## 5. InChI and InChIKey: an identity for every molecule
 
 The **InChI** (IUPAC International Chemical Identifier) is a standard, open, layered description
 of a molecule, produced the same way by every program that uses the official software. The
@@ -203,7 +304,7 @@ InChIKey equal: True
 InChIKeys are hashes, so two different molecules could in principle share one; in practice
 collisions are extremely rare, but a careful pipeline keeps the full InChI or SMILES beside the key.
 
-## 5. Molfiles and SDF: the connection table
+## 6. Molfiles and SDF: the connection table
 
 Before SMILES there were **connection tables**: a list of atoms (with coordinates) and a list of
 bonds between them. The MDL molfile is the classic format, and an SDF file is many molfiles one after
@@ -231,7 +332,7 @@ Read it as a table: the counts line (3 atoms, 2 bonds), three atom lines (x, y, 
 bond lines (atom, atom, bond order). Unlike SMILES, a molfile carries coordinates, which also means
 it is much larger: Module 2 measures what each format costs.
 
-## 6. Three dimensions: conformers
+## 7. Three dimensions: conformers
 
 Real molecules are three-dimensional and flexible. RDKit can generate 3D shapes (conformers), but
 one molecule has many, and which you get depends on the method and the random seed:
@@ -255,7 +356,7 @@ same atoms, different coordinates: True
 So 3D coordinates are not an identity: store them, when a job needs them (docking, shape
 searches), as data *about* a molecule, never as the molecule's key.
 
-## 7. SMARTS: patterns, not molecules
+## 8. SMARTS: patterns, not molecules
 
 **SMARTS** describes a pattern to search for, not a molecule. A common mistake is to search with a
 molecule written as SMILES. `C(=O)O` read as a molecule matches any carbon double-bonded to one
@@ -289,7 +390,7 @@ ibuprofen          C(=O)O as a molecule: True   acid SMARTS: True
 Methyl salicylate is an ester, not an acid: only the SMARTS gets it right. Module 3 runs the same
 searches inside the database.
 
-## 8. Fingerprints: molecules as bits
+## 9. Fingerprints: molecules as bits
 
 To compare thousands of molecules quickly, we turn each into a **fingerprint**, a fixed-length
 string of bits. A Morgan (circular, ECFP-like) fingerprint looks at every atom's surroundings out to
@@ -319,7 +420,7 @@ The **Tanimoto similarity** is the number of bits both have divided by the numbe
 fingerprint cannot be turned back into a molecule, and two different molecules can share one: it is
 for comparing and searching, not for identity.
 
-## 9. Descriptors: molecules as numbers
+## 10. Descriptors: molecules as numbers
 
 **Descriptors** are numbers calculated from a molecule: molecular weight, logP (a predicted
 partition coefficient), polar surface area, hydrogen-bond donors. They are what most machine-learning
@@ -346,14 +447,15 @@ ibuprofen            206.3   3.07   37.3    1
 Descriptors are calculated, so they depend on the toolkit and its version: store the version beside
 them (Module 12 returns to this).
 
-## 10. What to store, for which job
+## 11. What to store, for which job
 
 | Representation | Keeps | Loses | Use it for |
 |---|---|---|---|
 | Canonical isomeric SMILES | Connectivity, stereochemistry, charges | Coordinates; toolkit-specific | Readable storage, exchange, rebuilding the molecule |
 | InChI / InChIKey | A standard identity, the same in every program | Readability (the key); some tautomer detail | Keys, joins, finding duplicates |
 | Molfile / SDF | Coordinates, data fields | Compactness | Receiving and sending libraries; 3D work |
-| Molecular graph | Atoms, bonds, structure | Nothing of the 2D structure; no coordinates | Graph algorithms, graph databases, graph neural networks |
+| Molecular graph | Atoms, bonds, structure | Nothing of the 2D structure; no coordinates | Graph algorithms, graph databases |
+| Adjacency, distance and feature matrices | The graph and chosen atom properties, as numbers | Compactness (they grow with atoms squared) | Algorithms, graph neural networks; build them when needed |
 | 3D conformers | Shape | Uniqueness | Docking, shape searches (as data, never as a key) |
 | SMARTS | A pattern | It is not a molecule | Searching and filtering |
 | Fingerprints | Local environments, as bits | Can't be reversed; not unique | Similarity search, clustering, machine learning |
