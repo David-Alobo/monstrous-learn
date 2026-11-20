@@ -15,7 +15,15 @@ HERE = Path(__file__).parent
 LESSONS = sorted(HERE.glob("[0-9][0-9]-*/lesson.md"))
 ids = {"ids": lambda p: p.parent.name}
 # import names that differ from their pip package names
-PIP_NAME = {"yaml": "pyyaml", "sklearn": "scikit-learn", "psycopg": "psycopg[binary]"}
+PIP_NAME = {
+    "yaml": "pyyaml",
+    "sklearn": "scikit-learn",
+    "psycopg": "psycopg[binary]",
+    "openbabel": "openbabel-wheel",
+    "pydantic_settings": "pydantic-settings",
+}
+# modules that come with this repository rather than from pip
+LOCAL = {p.stem for p in HERE.glob("*.py")}
 STDLIB = set(sys.stdlib_module_names)
 
 
@@ -47,7 +55,7 @@ def test_declares_every_package_it_imports(lesson):
                 names = [node.module]
             for name in names:
                 top = name.split(".")[0]
-                if top not in STDLIB:
+                if top not in STDLIB and top not in LOCAL:
                     assert PIP_NAME.get(top, top) in declared, (
                         f"{top} is imported but not in requires"
                     )

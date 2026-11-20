@@ -22,6 +22,7 @@ dependencies = [
     "tenacity>=9.0",
     "matplotlib>=3.9",
     "dvc>=3.50",
+    "openbabel-wheel>=3.1",
 ]
 
 [dependency-groups]

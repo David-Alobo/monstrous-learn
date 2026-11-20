@@ -8,3 +8,6 @@ node_modules/
 # data are downloaded by scripts, never committed
 data/*
 !data/README.md
+
+# data a lesson writes while it runs (never committed)
+data-engineering/*/*/work/
