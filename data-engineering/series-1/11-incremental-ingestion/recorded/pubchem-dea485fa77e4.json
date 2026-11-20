@@ -1,0 +1,38 @@
+{
+ "url": "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/54678486,5090,2662,999999999/property/Title,MolecularFormula,MolecularWeight,SMILES,InChIKey/JSON",
+ "status": 200,
+ "recorded": "2026-11-20",
+ "body": {
+  "PropertyTable": {
+   "Properties": [
+    {
+     "CID": 54678486,
+     "MolecularFormula": "C19H16O4",
+     "MolecularWeight": "308.3",
+     "SMILES": "CC(=O)CC(C1=CC=CC=C1)C2=C(C3=CC=CC=C3OC2=O)O",
+     "InChIKey": "PJVWKTKQMONHTI-UHFFFAOYSA-N",
+     "Title": "Warfarin"
+    },
+    {
+     "CID": 5090,
+     "MolecularFormula": "C17H14O4S",
+     "MolecularWeight": "314.4",
+     "SMILES": "CS(=O)(=O)C1=CC=C(C=C1)C2=C(C(=O)OC2)C3=CC=CC=C3",
+     "InChIKey": "RZJQGNCSTQAWON-UHFFFAOYSA-N",
+     "Title": "Rofecoxib"
+    },
+    {
+     "CID": 2662,
+     "MolecularFormula": "C17H14F3N3O2S",
+     "MolecularWeight": "381.4",
+     "SMILES": "CC1=CC=C(C=C1)C2=CC(=NN2C3=CC=C(C=C3)S(=O)(=O)N)C(F)(F)F",
+     "InChIKey": "RZEKVGVHFLEQIL-UHFFFAOYSA-N",
+     "Title": "Celecoxib"
+    },
+    {
+     "CID": 999999999
+    }
+   ]
+  }
+ }
+}

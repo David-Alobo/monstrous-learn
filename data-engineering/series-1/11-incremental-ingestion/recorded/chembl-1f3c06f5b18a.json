@@ -1,0 +1,15 @@
+{
+ "url": "https://www.ebi.ac.uk/chembl/api/data/activity.json?activity_id__gt=28800434&limit=100&only=activity_id%2Cmolecule_chembl_id%2Cstandard_type%2Cstandard_relation%2Cstandard_value%2Cstandard_units%2Cpchembl_value%2Cdocument_chembl_id&order_by=activity_id&pchembl_value__isnull=false&standard_type=IC50&target_chembl_id=CHEMBL3529",
+ "status": 200,
+ "recorded": "2026-11-20",
+ "body": {
+  "activities": [],
+  "page_meta": {
+   "limit": 100,
+   "next": null,
+   "offset": 0,
+   "previous": null,
+   "total_count": 0
+  }
+ }
+}

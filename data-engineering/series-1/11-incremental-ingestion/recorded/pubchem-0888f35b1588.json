@@ -1,0 +1,51 @@
+{
+ "url": "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/3033,4091,60823,4594,33613/property/Title,MolecularFormula,MolecularWeight,SMILES,InChIKey/JSON",
+ "status": 200,
+ "recorded": "2026-11-20",
+ "body": {
+  "PropertyTable": {
+   "Properties": [
+    {
+     "CID": 3033,
+     "MolecularFormula": "C14H11Cl2NO2",
+     "MolecularWeight": "296.1",
+     "SMILES": "C1=CC=C(C(=C1)CC(=O)O)NC2=C(C=CC=C2Cl)Cl",
+     "InChIKey": "DCOPUUMXTXDBNB-UHFFFAOYSA-N",
+     "Title": "Diclofenac"
+    },
+    {
+     "CID": 4091,
+     "MolecularFormula": "C4H11N5",
+     "MolecularWeight": "129.16",
+     "SMILES": "CN(C)C(=N)N=C(N)N",
+     "InChIKey": "XZWYZXLIPXDOLR-UHFFFAOYSA-N",
+     "Title": "Metformin"
+    },
+    {
+     "CID": 60823,
+     "MolecularFormula": "C33H35FN2O5",
+     "MolecularWeight": "558.6",
+     "SMILES": "CC(C)C1=C(C(=C(N1CC[C@H](C[C@H](CC(=O)O)O)O)C2=CC=C(C=C2)F)C3=CC=CC=C3)C(=O)NC4=CC=CC=C4",
+     "InChIKey": "XUKUURHRXDUEBC-KAYWLYCHSA-N",
+     "Title": "Atorvastatin"
+    },
+    {
+     "CID": 4594,
+     "MolecularFormula": "C17H19N3O3S",
+     "MolecularWeight": "345.4",
+     "SMILES": "CC1=CN=C(C(=C1OC)C)CS(=O)C2=NC3=C(N2)C=C(C=C3)OC",
+     "InChIKey": "SUBDBMMJDZJVOS-UHFFFAOYSA-N",
+     "Title": "Omeprazole"
+    },
+    {
+     "CID": 33613,
+     "MolecularFormula": "C16H19N3O5S",
+     "MolecularWeight": "365.4",
+     "SMILES": "CC1([C@@H](N2[C@H](S1)[C@@H](C2=O)NC(=O)[C@@H](C3=CC=C(C=C3)O)N)C(=O)O)C",
+     "InChIKey": "LSQZJLSUYDQPKJ-NJBDSQKTSA-N",
+     "Title": "Amoxicillin"
+    }
+   ]
+  }
+ }
+}
