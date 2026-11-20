@@ -1,0 +1,23 @@
+[project]
+name = "monstrous-learn"
+version = "0.1.0"
+description = "Monstrous Data's free courses: data engineering for chemists. The site builder and shared tooling; each series has its own environment in its folder."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "David Obeh Alobo", email = "david.alobo@monstrous.com.ng" }]
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

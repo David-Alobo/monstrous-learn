@@ -1,0 +1,10 @@
+__pycache__/
+.venv/
+.pytest_cache/
+.ruff_cache/
+dist/
+shots/
+node_modules/
+# data are downloaded by scripts, never committed
+data/*
+!data/README.md
