@@ -33,6 +33,7 @@ FORBIDDEN_FILES = (
     r"|\.(sdf|smi|parquet)(\.gz)?$"  # data files: these go on Zenodo or a release
 )
 TOO_LARGE = 5_000_000  # bytes; data belongs on Zenodo or a release, not in git
+EXAMPLES = {"tests/test_prepublish.py"}  # files whose fake secrets are there on purpose
 
 
 def git(*args: str) -> str:
@@ -57,8 +58,13 @@ def findings() -> list[str]:
     found = []
     for commit in git("rev-list", "--all").split():
         diff = git("show", "--format=", "--unified=0", commit)
+        path = ""
         for line in diff.splitlines():
-            if not line.startswith("+") or line.startswith("+++"):
+            if line.startswith("+++ "):
+                path = line[6:] if line.startswith("+++ b/") else ""
+                continue
+            # the checker's own tests contain fake secrets on purpose, to prove they are caught
+            if not line.startswith("+") or path in EXAMPLES:
                 continue
             for what, pattern in FORBIDDEN.items():
                 if re.search(pattern, line[1:], re.M):

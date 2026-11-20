@@ -1,0 +1,45 @@
+# The databases the courses use, the same on Windows, macOS and Linux (Docker Desktop, or Docker on
+# Linux). From the repository's root:
+#
+#   docker compose -f shared/docker/compose.yml up -d postgres neo4j   # start
+#   docker compose -f shared/docker/compose.yml down                    # stop (data is kept)
+#   docker compose -f shared/docker/compose.yml down -v                 # stop and delete the data
+#
+# Then tell the lessons where they are (the defaults below), e.g. in a terminal:
+#   DATABASE_URL=postgresql://learn:learn@localhost:5432/chem
+#   NEO4J_URI=bolt://localhost:7687   NEO4J_USER=neo4j   NEO4J_PASSWORD=learn-neo4j
+#
+# Images are pinned to exact versions, so every learner gets the same database.
+# These passwords are for a database on your own computer only: never reuse them anywhere else.
+services:
+  postgres:
+    # PostgreSQL 17 with the RDKit cartridge (https://github.com/InformaticsMatters/docker-rdkit)
+    image: informaticsmatters/rdkit-cartridge-debian:Release_2026_09_1
+    environment:
+      POSTGRES_USER: learn
+      POSTGRES_PASSWORD: learn
+      POSTGRES_DB: chem
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro  # creates the rdkit extension on first start
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U learn -d chem"]
+      interval: 5s
+      retries: 20
+
+  neo4j:
+    # the official Neo4j image, Community edition
+    image: neo4j:5.26-community
+    environment:
+      NEO4J_AUTH: neo4j/learn-neo4j
+    ports:
+      - "7474:7474"  # the browser interface: http://localhost:7474
+      - "7687:7687"  # the Bolt protocol, used by the Python driver
+    volumes:
+      - neo4j-data:/data
+
+volumes:
+  postgres-data:
+  neo4j-data:
