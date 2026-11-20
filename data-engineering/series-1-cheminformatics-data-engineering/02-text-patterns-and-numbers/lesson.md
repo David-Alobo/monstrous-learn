@@ -1,331 +1,31 @@
 ---
-title: Representing molecules
-summary: How a computer holds a molecule, what each representation keeps and loses, and which to store for which job.
+title: Molecules as text, patterns and numbers
+summary: SMILES, InChI, molfiles, conformers, SMARTS, fingerprints and descriptors: what each keeps and loses, and which to store for which job.
 ---
 
-A chemist looks at a drawing and sees aspirin. A computer sees nothing until the molecule is
-written down as text, numbers or a graph, and every way of writing it down keeps some things and
-loses others. Data engineering for chemistry starts here: before we can store, search, clean or
-scale anything, we have to decide what a molecule *is* inside our systems.
+Module 1 treated a molecule as a graph. Most chemical data does not arrive as graphs, though: it
+arrives as text (SMILES strings, InChIs, SDF files), is searched with patterns, and is compared and
+modelled as numbers. Each of these representations keeps some things and loses others, and a data
+engineer has to know which, before choosing what to store.
 
 By the end of this module you will be able to:
 
-- read a molecule into RDKit and walk through its atoms and bonds;
-- write a molecule as matrices with NetworkX, encode atom and bond properties in them, and compute
-  on them with NumPy;
 - explain why one molecule has many SMILES but one canonical SMILES;
 - tell what a representation keeps and what it loses (stereochemistry, aromaticity, tautomers);
 - use InChIKey as a molecule's identity, and SMARTS as a search pattern;
 - turn molecules into fingerprints and descriptors for comparison and machine learning;
 - choose what to store, for which job.
 
-Everything here runs in a browser notebook or on any laptop: you need Python and RDKit only.
-
-## 1. A molecule is a graph
-
-To RDKit, a molecule is a graph: **atoms are nodes and bonds are edges**. Hydrogens are usually
-left implicit, so only the heavy atoms appear. Here is aspirin, with every atom numbered in the
-order RDKit reads it:
-
-![Aspirin drawn by RDKit with every atom numbered](figures/aspirin-atoms.svg)
+Everything here runs in a browser notebook or on any laptop: you need Python, RDKit and pandas.
+We start from aspirin again:
 
 ```python
 from rdkit import Chem
 
 aspirin = Chem.MolFromSmiles("CC(=O)Oc1ccccc1C(=O)O")
-print(aspirin.GetNumAtoms(), "heavy atoms,", aspirin.GetNumBonds(), "bonds")
-for atom in list(aspirin.GetAtoms())[:5]:
-    neighbours = [n.GetIdx() for n in atom.GetNeighbors()]
-    print(f"atom {atom.GetIdx()}: {atom.GetSymbol()}, bonded to {neighbours}")
-```
-```output
-13 heavy atoms, 13 bonds
-atom 0: C, bonded to [1]
-atom 1: C, bonded to [0, 2, 3]
-atom 2: O, bonded to [1]
-atom 3: O, bonded to [1, 4]
-atom 4: C, bonded to [3, 5, 9]
 ```
 
-The same molecule as a plain graph in NetworkX, the way a graph library or a graph database sees it.
-Every node carries the atom's properties and every edge the bond's; the next section turns them
-into numbers.
-
-![Aspirin as a graph: atoms as circles, bonds as lines](figures/aspirin-graph.svg)
-
-```python
-import networkx as nx
-
-
-def to_graph(mol):
-    """A molecule as a NetworkX graph: atoms as nodes, bonds as edges, each with its properties."""
-    g = nx.Graph()
-    for atom in mol.GetAtoms():
-        g.add_node(
-            atom.GetIdx(),
-            element=atom.GetSymbol(),
-            hydrogens=atom.GetTotalNumHs(),
-            charge=atom.GetFormalCharge(),
-            aromatic=atom.GetIsAromatic(),
-        )
-    for bond in mol.GetBonds():
-        g.add_edge(
-            bond.GetBeginAtomIdx(),
-            bond.GetEndAtomIdx(),
-            bond_type=str(bond.GetBondType()),
-            order=bond.GetBondTypeAsDouble(),
-        )
-    return g
-
-
-graph = to_graph(aspirin)
-print(graph.number_of_nodes(), "nodes,", graph.number_of_edges(), "edges")
-print("rings:", [sorted(ring) for ring in nx.cycle_basis(graph)])
-print("bonds between the two carbonyl carbons:", nx.shortest_path_length(graph, 1, 10))
-```
-```output
-13 nodes, 13 edges
-rings: [[4, 5, 6, 7, 8, 9]]
-bonds between the two carbonyl carbons: 4
-```
-
-Graph questions (rings, paths, which atoms are connected) are chemistry questions. Module 4 comes
-back to this when we store molecules in a graph database.
-
-## 2. Molecules as matrices
-
-Algorithms, and graph neural networks in particular, see a molecule as matrices. NetworkX builds
-them straight from the graph. The **adjacency matrix** has one row and one column per atom, with a
-1 where two atoms are bonded. Here it is for acetic acid, each atom labelled by element and index,
-checked against RDKit's own:
-
-```python
-import numpy as np
-import pandas as pd
-
-acetic_acid = Chem.MolFromSmiles("CC(=O)O")
-g = to_graph(acetic_acid)
-atoms = sorted(g)
-labels = [f"{g.nodes[i]['element']}{i}" for i in atoms]
-adjacency = nx.to_numpy_array(g, nodelist=atoms, weight=None, dtype=int)
-print(pd.DataFrame(adjacency, index=labels, columns=labels))
-print("symmetric:", bool((adjacency == adjacency.T).all()))
-print("bonds per atom (row sums):", adjacency.sum(axis=1).tolist())
-print("same as RDKit's:", bool((adjacency == Chem.GetAdjacencyMatrix(acetic_acid)).all()))
-```
-```output
-    C0  C1  O2  O3
-C0   0   1   0   0
-C1   1   0   1   1
-O2   0   1   0   0
-O3   0   1   0   0
-symmetric: True
-bonds per atom (row sums): [1, 3, 1, 1]
-same as RDKit's: True
-```
-
-Bonds have no direction, so the matrix is symmetric, and each row adds up to the number of bonds
-that atom makes (its degree). For aspirin the matrix is 13 by 13 and mostly zeros: each atom is
-bonded to only a few others.
-
-![Aspirin's adjacency matrix as a grid: a coloured square wherever two atoms are bonded, darker for double and aromatic bonds](figures/aspirin-adjacency.svg)
-
-### Encoding a molecule's properties
-
-A plain adjacency matrix says only *which* atoms are bonded. Chemistry needs more: what each atom
-is, and what kind each bond is. There are four standard ways to put those properties into numbers.
-
-**1. Weights in the matrix.** Put a number in each cell instead of a 1. With the bond order as the
-weight, the cells read 1, 1.5 (aromatic), 2 or 3:
-
-```python
-orders = nx.to_numpy_array(g, nodelist=atoms, weight="order")
-print(pd.DataFrame(orders, index=labels, columns=labels))
-```
-```output
-     C0   C1   O2   O3
-C0  0.0  1.0  0.0  0.0
-C1  1.0  0.0  2.0  1.0
-O2  0.0  2.0  0.0  0.0
-O3  0.0  1.0  0.0  0.0
-```
-
-One number per cell can carry one property only, so the other properties go beside the matrix.
-
-**2. An atom feature matrix.** One row per atom, one column per property. Numbers (charge,
-hydrogens) go in as numbers; categories (the element) are **one-hot encoded**, one column per
-category with a 1 in the right one, so that a model never reads "oxygen = 8" as "more than carbon":
-
-```python
-ELEMENTS = ["C", "N", "O"]
-
-
-def atom_features(data):
-    element = [int(data["element"] == e) for e in ELEMENTS]
-    other = int(data["element"] not in ELEMENTS)
-    return [*element, other, data["hydrogens"], data["charge"], int(data["aromatic"])]
-
-
-columns = [*ELEMENTS, "other", "hydrogens", "charge", "aromatic"]
-X = np.array([atom_features(g.nodes[i]) for i in atoms])
-print(pd.DataFrame(X, index=labels, columns=columns))
-```
-```output
-    C  N  O  other  hydrogens  charge  aromatic
-C0  1  0  0      0          3       0         0
-C1  1  0  0      0          0       0         0
-O2  0  0  1      0          0       0         0
-O3  0  0  1      0          1       0         0
-```
-
-**3. A bond tensor: one adjacency matrix per bond type.** Stack one matrix for single bonds, one
-for double, one for triple, one for aromatic. Each "layer" is an ordinary adjacency matrix, and
-together they say exactly which kind of bond joins which atoms:
-
-```python
-BOND_TYPES = ["SINGLE", "DOUBLE", "TRIPLE", "AROMATIC"]
-tensor = np.zeros((len(BOND_TYPES), len(atoms), len(atoms)), dtype=int)
-for i, j, data in g.edges(data=True):
-    k = BOND_TYPES.index(data["bond_type"])
-    tensor[k, i, j] = tensor[k, j, i] = 1
-for name, layer in zip(BOND_TYPES[:2], tensor[:2], strict=True):
-    print(f"{name} bonds:")
-    print(pd.DataFrame(layer, index=labels, columns=labels))
-print("shape of the bond tensor (types, atoms, atoms):", tensor.shape)
-```
-```output
-SINGLE bonds:
-    C0  C1  O2  O3
-C0   0   1   0   0
-C1   1   0   0   1
-O2   0   0   0   0
-O3   0   1   0   0
-DOUBLE bonds:
-    C0  C1  O2  O3
-C0   0   0   0   0
-C1   0   0   1   0
-O2   0   1   0   0
-O3   0   0   0   0
-shape of the bond tensor (types, atoms, atoms): (4, 4, 4)
-```
-
-**4. An edge list with edge features.** Instead of n-by-n matrices, list each bond once in each
-direction, with a row of features per entry. This is what graph neural network libraries take: it
-grows with the bonds, not with the square of the atoms:
-
-```python
-pairs = [(i, j) for i, j in g.edges()] + [(j, i) for i, j in g.edges()]
-edge_index = np.array(pairs).T
-edge_features = np.array([[int(g.edges[i, j]["bond_type"] == t) for t in BOND_TYPES] for i, j in pairs])
-print("edge index (from, to):")
-print(edge_index)
-print("edge features (one-hot bond type):")
-print(pd.DataFrame(edge_features, columns=BOND_TYPES, index=[f"{i}-{j}" for i, j in pairs]))
-```
-```output
-edge index (from, to):
-[[0 1 1 1 2 3]
- [1 2 3 0 1 1]]
-edge features (one-hot bond type):
-     SINGLE  DOUBLE  TRIPLE  AROMATIC
-0-1       1       0       0         0
-1-2       0       1       0         0
-1-3       1       0       0         0
-1-0       1       0       0         0
-2-1       0       1       0         0
-3-1       1       0       0         0
-```
-
-Together, the atom feature matrix `X` and either the bond tensor or the edge list with its features
-describe the whole molecule as numbers. The MLOps track builds models on exactly these.
-
-### Distances
-
-The **distance matrix** counts the bonds on the shortest path between every pair of atoms.
-NetworkX and RDKit give the same answer:
-
-```python
-aspirin_graph = to_graph(aspirin)
-distances = nx.floyd_warshall_numpy(aspirin_graph, nodelist=sorted(aspirin_graph))
-print("bonds between the two carbonyl carbons:", int(distances[1, 10]))
-print("the two atoms furthest apart are", int(distances.max()), "bonds apart")
-print("same as RDKit's:", bool((distances == Chem.GetDistanceMatrix(aspirin)).all()))
-```
-```output
-bonds between the two carbonyl carbons: 4
-the two atoms furthest apart are 6 bonds apart
-same as RDKit's: True
-```
-
-### Graph operations with NumPy
-
-Once a molecule is a matrix, graph questions become arithmetic. With aspirin's adjacency matrix
-`A`, row sums give each atom's degree and the non-zero entries of a row are its neighbours. Squaring
-the matrix counts routes: `(A @ A)[i, j]` is the number of two-bond walks from atom `i` to atom `j`,
-and its diagonal gives the degrees back:
-
-```python
-A = nx.to_numpy_array(aspirin_graph, nodelist=sorted(aspirin_graph), weight=None, dtype=int)
-print("degrees:", A.sum(axis=1).tolist())
-print("neighbours of atom 4:", np.nonzero(A[4])[0].tolist())
-A2 = A @ A
-print("two-bond walks from atom 1 to atom 4:", int(A2[1, 4]))
-print("diagonal of A @ A equals the degrees:", bool((np.diag(A2) == A.sum(axis=1)).all()))
-```
-```output
-degrees: [1, 3, 1, 2, 3, 2, 2, 2, 2, 3, 3, 1, 1]
-neighbours of atom 4: [3, 5, 9]
-two-bond walks from atom 1 to atom 4: 1
-diagonal of A @ A equals the degrees: True
-```
-
-Multiplying the adjacency matrix by the atom feature matrix adds up each atom's neighbours'
-features: after one step, every atom "knows" what it is bonded to. This is one round of **message
-passing**, the core operation of graph neural networks, and the same idea a Morgan fingerprint uses
-when it grows each atom's environment one bond at a time:
-
-```python
-aspirin_atoms = sorted(aspirin_graph)
-aspirin_labels = [f"{aspirin_graph.nodes[i]['element']}{i}" for i in aspirin_atoms]
-X_aspirin = np.array([atom_features(aspirin_graph.nodes[i]) for i in aspirin_atoms])
-messages = A @ X_aspirin
-print(pd.DataFrame(messages, index=aspirin_labels, columns=columns).head(5))
-```
-```output
-    C  N  O  other  hydrogens  charge  aromatic
-C0  1  0  0      0          0       0         0
-C1  1  0  2      0          3       0         0
-O2  1  0  0      0          0       0         0
-O3  2  0  0      0          0       0         1
-C4  2  0  1      0          1       0         2
-```
-
-Atom 1, the acetyl carbon, receives one carbon and two oxygens from its neighbours; atom 4 receives
-two aromatic carbons and an oxygen.
-
-The **graph Laplacian**, `L = D - A` (the degrees on the diagonal minus the adjacency matrix), has
-one zero eigenvalue for every separate piece of a graph. A record of sodium acetate holds two pieces,
-the acetate and the sodium ion, and the arithmetic finds both, a check Module 5 uses to spot salts
-and mixtures:
-
-```python
-salt = Chem.MolFromSmiles("CC(=O)[O-].[Na+]")
-A_salt = Chem.GetAdjacencyMatrix(salt)
-laplacian = np.diag(A_salt.sum(axis=1)) - A_salt
-eigenvalues = np.linalg.eigvalsh(laplacian)
-print("Laplacian eigenvalues:", (np.round(eigenvalues, 3) + 0.0).tolist())  # + 0.0 turns -0.0 into 0.0
-print("pieces:", int(np.isclose(eigenvalues, 0).sum()), " RDKit agrees:", len(Chem.GetMolFrags(salt)))
-```
-```output
-Laplacian eigenvalues: [0.0, 0.0, 1.0, 1.0, 4.0]
-pieces: 2  RDKit agrees: 2
-```
-
-Matrices are convenient for computation but wasteful for storage: an adjacency matrix grows with
-the square of the number of atoms, while a list of bonds grows only with the bonds. Store the
-molecule (or its bond list) and build matrices when an algorithm needs them.
-
-## 3. SMILES: one molecule, many strings
+## 1. SMILES: one molecule, many strings
 
 SMILES writes the graph as a line of text by walking through it. There are many valid walks, so
 one molecule has many SMILES. RDKit's **canonical SMILES** always picks the same one, which makes
@@ -345,7 +45,7 @@ C(O)C            -> CCO
 
 Canonical means canonical *for one toolkit and version*: another program, or another RDKit
 release, may choose a different canonical form. That is why a database needs an identity that does
-not depend on the toolkit (section 5).
+not depend on the toolkit (section 3).
 
 **Aromaticity** is a choice too. Benzene can be written with alternating double bonds (Kekulé) or
 with aromatic lower-case atoms; RDKit perceives the aromatic form when it reads the molecule:
@@ -362,9 +62,9 @@ kekulised:  C1=CC=CC=C1
 ```
 
 Different toolkits perceive aromaticity by different rules, so the same file can give different
-aromatic forms in different programs: one more reason to standardise before storing (Module 6).
+aromatic forms in different programs: one more reason to standardise before storing (Module 7).
 
-## 4. What a representation can lose: stereochemistry
+## 2. What a representation can lose: stereochemistry
 
 Ibuprofen has one stereocentre. The two mirror images (enantiomers) are different molecules with
 different biology, and isomeric SMILES keeps them apart with `@` and `@@`:
@@ -402,7 +102,7 @@ flat: CC(C)Cc1ccc(C(C)C(=O)O)cc1
 Store the flat form and your database silently merges two different drugs. Sometimes that is what
 you want (grouping a racemate with its enantiomers), but it must be a decision, never an accident.
 
-## 5. InChI and InChIKey: an identity for every molecule
+## 3. InChI and InChIKey: an identity for every molecule
 
 The **InChI** (IUPAC International Chemical Identifier) is a standard, open, layered description
 of a molecule, produced the same way by every program that uses the official software. The
@@ -450,7 +150,7 @@ InChIKey equal: True
 InChIKeys are hashes, so two different molecules could in principle share one; in practice
 collisions are extremely rare, but a careful pipeline keeps the full InChI or SMILES beside the key.
 
-## 6. Molfiles and SDF: the connection table
+## 4. Molfiles and SDF: the connection table
 
 Before SMILES there were **connection tables**: a list of atoms (with coordinates) and a list of
 bonds between them. The MDL molfile is the classic format, and an SDF file is many molfiles one after
@@ -476,9 +176,9 @@ M  END
 
 Read it as a table: the counts line (3 atoms, 2 bonds), three atom lines (x, y, z, element) and two
 bond lines (atom, atom, bond order). Unlike SMILES, a molfile carries coordinates, which also means
-it is much larger: Module 2 measures what each format costs.
+it is much larger: Module 3 measures what each format costs.
 
-## 7. Three dimensions: conformers
+## 5. Three dimensions: conformers
 
 Real molecules are three-dimensional and flexible. RDKit can generate 3D shapes (conformers), but
 one molecule has many, and which you get depends on the method and the random seed:
@@ -502,7 +202,7 @@ same atoms, different coordinates: True
 So 3D coordinates are not an identity: store them, when a job needs them (docking, shape
 searches), as data *about* a molecule, never as the molecule's key.
 
-## 8. SMARTS: patterns, not molecules
+## 6. SMARTS: patterns, not molecules
 
 **SMARTS** describes a pattern to search for, not a molecule. A common mistake is to search with a
 molecule written as SMILES. `C(=O)O` read as a molecule matches any carbon double-bonded to one
@@ -533,10 +233,10 @@ methyl salicylate  C(=O)O as a molecule: True   acid SMARTS: False
 ibuprofen          C(=O)O as a molecule: True   acid SMARTS: True
 ```
 
-Methyl salicylate is an ester, not an acid: only the SMARTS gets it right. Module 3 runs the same
+Methyl salicylate is an ester, not an acid: only the SMARTS gets it right. Module 4 runs the same
 searches inside the database.
 
-## 9. Fingerprints: molecules as bits
+## 7. Fingerprints: molecules as bits
 
 To compare thousands of molecules quickly, we turn each into a **fingerprint**, a fixed-length
 string of bits. A Morgan (circular, ECFP-like) fingerprint looks at every atom's surroundings out to
@@ -566,7 +266,7 @@ The **Tanimoto similarity** is the number of bits both have divided by the numbe
 fingerprint cannot be turned back into a molecule, and two different molecules can share one: it is
 for comparing and searching, not for identity.
 
-## 10. Descriptors: molecules as numbers
+## 8. Descriptors: molecules as numbers
 
 **Descriptors** are numbers calculated from a molecule: molecular weight, logP (a predicted
 partition coefficient), polar surface area, hydrogen-bond donors. They are what most machine-learning
@@ -591,9 +291,9 @@ ibuprofen            206.3   3.07   37.3    1
 ```
 
 Descriptors are calculated, so they depend on the toolkit and its version: store the version beside
-them (Module 12 returns to this).
+them (Module 13 returns to this).
 
-## 11. What to store, for which job
+## 9. What to store, for which job
 
 | Representation | Keeps | Loses | Use it for |
 |---|---|---|---|
@@ -654,6 +354,9 @@ code above. Answers are published after the cohort's deadline.
   Sciences*, 32(3), 244–255. <https://doi.org/10.1021/ci00007a012>
 - Rogers, D. & Hahn, M. (2010). Extended-connectivity fingerprints. *Journal of Chemical
   Information and Modeling*, 50(5), 742–754. <https://doi.org/10.1021/ci100050t>
+- David, L., Thakkar, A., Mercado, R. & Engkvist, O. (2020). Molecular representations in AI-driven
+  drug discovery: a review and practical guide. *Journal of Cheminformatics*, 12, 56.
+  <https://doi.org/10.1186/s13321-020-00460-5>
 - Daylight Chemical Information Systems. *Daylight Theory Manual*, chapters on SMILES and SMARTS.
   <https://www.daylight.com/dayhtml/doc/theory/>
 - The RDKit documentation. *Getting Started with the RDKit in Python*.

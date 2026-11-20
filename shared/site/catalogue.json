@@ -25,7 +25,7 @@
           "tagline": "From SDF files to chemical data pipelines that scale to millions of molecules, survive failures and can be trusted.",
           "status": "January 2027",
           "level": "For chemists who know some Python",
-          "summary": "Fourteen modules on the engineering that sits between raw chemical files and machine learning. It starts with how molecules are represented and stored, in relational and graph databases; then the course turns to what breaks in practice: libraries too big for memory, jobs that need many cores, pipelines that fail halfway, data that drifts, and results nobody can reproduce. Each idea is built by hand first, so you understand it before Series 2 hands it to industry tools.",
+          "summary": "Fifteen modules on the engineering that sits between raw chemical files and machine learning. It starts with how molecules are represented and stored, in relational and graph databases; then the course turns to what breaks in practice: libraries too big for memory, jobs that need many cores, pipelines that fail halfway, data that drifts, and results nobody can reproduce. Each idea is built by hand first, so you understand it before Series 2 hands it to industry tools.",
           "tools": [
             "Python",
             "pandas and PyArrow",
@@ -41,16 +41,29 @@
           ],
           "modules": [
             {
-              "number": 1,
               "part": "Foundations",
-              "title": "Representing molecules",
-              "what": "How a computer holds a molecule: SMILES (canonical and isomeric), InChI and InChIKey, connection tables in molfiles and SDF, molecular graphs, 3D conformers, SMARTS patterns, fingerprints and descriptors; what each keeps, what each loses (stereochemistry, tautomers, aromaticity), and which to store for which job.",
+              "title": "Molecules as graphs and matrices",
+              "what": "A molecule is a graph: atoms are nodes, bonds are edges. Build it in NetworkX, write it as adjacency, bond-order and distance matrices, encode atom and bond properties (weights, one-hot features, bond tensors, edge lists), and compute on it with NumPy, up to one step of message passing.",
               "tools": [
-                "RDKit"
-              ]
+                "RDKit",
+                "NetworkX",
+                "NumPy",
+                "pandas"
+              ],
+              "number": 1
             },
             {
-              "number": 2,
+              "part": "Foundations",
+              "title": "Molecules as text, patterns and numbers",
+              "what": "SMILES (canonical and isomeric), InChI and InChIKey, molfiles and SDF, 3D conformers, SMARTS patterns, fingerprints and descriptors: what each keeps, what each loses (stereochemistry, tautomers, aromaticity), and which to store for which job.",
+              "tools": [
+                "RDKit",
+                "pandas"
+              ],
+              "number": 2
+            },
+            {
+              "number": 3,
               "part": "Foundations",
               "title": "Chemical files and identity",
               "what": "The files molecules travel in (SDF, SMILES, CSV, Parquet), what each costs in space and time, and a stable identity for every molecule (InChIKey) so duplicates can be found.",
@@ -61,7 +74,7 @@
               ]
             },
             {
-              "number": 3,
+              "number": 4,
               "part": "Foundations",
               "title": "A chemical database",
               "what": "Load a library into PostgreSQL with the RDKit cartridge, index it, search by substructure and similarity, read query plans, and use DuckDB for fast analysis.",
@@ -81,7 +94,7 @@
                 "Neo4j",
                 "Cypher"
               ],
-              "number": 4
+              "number": 5
             },
             {
               "part": "Foundations",
@@ -90,10 +103,10 @@
               "tools": [
                 "RDKit"
               ],
-              "number": 5
+              "number": 6
             },
             {
-              "number": 6,
+              "number": 7,
               "part": "Foundations",
               "title": "Standardisation as a tested transformation",
               "what": "Strip salts, neutralise charges and choose one tautomer as a pure, deterministic function with versioned rules and unit tests.",
@@ -103,7 +116,7 @@
               ]
             },
             {
-              "number": 7,
+              "number": 8,
               "part": "Scale",
               "title": "Libraries larger than memory",
               "what": "Stream molecules in batches instead of loading them all, write partitioned Parquet, and query far more rows than fit in memory; measure memory and throughput as you go.",
@@ -114,7 +127,7 @@
               ]
             },
             {
-              "number": 8,
+              "number": 9,
               "part": "Scale",
               "title": "Parallel and distributed processing",
               "what": "Spread standardisation and fingerprints across cores with joblib, then across memory and machines with Dask: chunk sizes, passing SMILES instead of molecule objects, when parallel work stops helping, and a scaling curve; the same code on Windows, macOS and Linux.",
@@ -124,7 +137,7 @@
               ]
             },
             {
-              "number": 9,
+              "number": 10,
               "part": "Reliability",
               "title": "Pipelines that survive failure",
               "what": "Idempotent steps, checkpoints and cached results, resuming from the last good batch, retries with back-off, atomic writes, quarantining bad molecules instead of crashing, and settings checked before a run starts.",
@@ -136,7 +149,7 @@
               ]
             },
             {
-              "number": 10,
+              "number": 11,
               "part": "Reliability",
               "title": "Incremental ingestion from ChEMBL and PubChem",
               "what": "Fetch only what changed, page through APIs within their rate limits, cache responses, check every response against a model so a changed API fails loudly, and run backfills safely.",
@@ -147,7 +160,7 @@
               ]
             },
             {
-              "number": 11,
+              "number": 12,
               "part": "Reliability",
               "title": "Validating data: records with Pydantic, tables with Pandera",
               "what": "Check single records at the edges with Pydantic and whole batches in bulk with Pandera: column types, required fields, value ranges, units (nM, µM, pIC50), duplicates, links between tables, and counts that agree across sources; measure why a million rows are not checked one at a time; stop or quarantine a batch that fails, and report why.",
@@ -159,7 +172,7 @@
               ]
             },
             {
-              "number": 12,
+              "number": 13,
               "part": "Reliability",
               "title": "Versioning everything",
               "what": "Version code, environments, database schemas, standardisation rules, datasets and results, so any number can be traced back and rebuilt exactly.",
@@ -172,7 +185,7 @@
               ]
             },
             {
-              "number": 13,
+              "number": 14,
               "part": "Reliability",
               "title": "Monitoring pipelines",
               "what": "Structured logs, run history, counts in and out that must reconcile, throughput and error rates, freshness, drift in molecular properties, and alerts when something goes wrong.",
@@ -183,7 +196,7 @@
               ]
             },
             {
-              "number": 14,
+              "number": 15,
               "part": "Capstone",
               "title": "Capstone: a resumable, monitored pipeline over a large library",
               "what": "Standardise, deduplicate, filter and fingerprint millions of molecules end to end; stop it halfway, resume it, version the output and show that every count reconciles.",

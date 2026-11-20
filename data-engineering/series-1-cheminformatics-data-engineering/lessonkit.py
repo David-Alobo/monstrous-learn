@@ -6,8 +6,8 @@ folder, exactly as a learner would run them. The tests compare every output bloc
 really prints, so a lesson can never show a result its code does not give.
 
 Usage (from the series folder):
-    uv run python lessonkit.py 01-representing-molecules           # check
-    uv run python lessonkit.py 01-representing-molecules --write   # rewrite the output blocks
+    uv run python lessonkit.py 01-graphs-and-matrices           # check
+    uv run python lessonkit.py 01-graphs-and-matrices --write   # rewrite the output blocks
 """
 
 from __future__ import annotations
