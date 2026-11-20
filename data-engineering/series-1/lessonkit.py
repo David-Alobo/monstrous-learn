@@ -245,6 +245,15 @@ def export(folder: Path) -> dict[Path, str]:
 
     install = "# Install what this lesson needs (in Colab, or any fresh environment)\n"
     install += f"%pip install -q {' '.join(listed(meta, 'requires'))}"
+    # the course's own helpers come with the repository; outside it (in Colab), fetch them
+    local = sorted(set(re.findall(r"^(?:from|import) (chemlib)\b", body, re.M)))
+    if local:
+        install += "\n\nimport pathlib\nimport urllib.request\n"
+        for name in local:
+            install += (
+                f'if not pathlib.Path("{name}.py").exists():\n'
+                f'    urllib.request.urlretrieve("{RAW}/{name}.py", "{name}.py")\n'
+            )
     cells = [
         md_cell(f"# {title}\n\n{summary}\n\nThe lesson's page: {page}"),
         code_cell(install, None),
