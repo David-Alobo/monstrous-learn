@@ -212,7 +212,12 @@ def course(cat: dict, k: int) -> str:
     s = cat["series"][k]
     planned = s["status"] == "Planned"
     mods = []
+    part = None
     for m in s["modules"]:
+        # a heading wherever the course moves to a new part (foundations, scale, ...)
+        if m.get("part") and m["part"] != part:
+            part = m["part"]
+            mods.append(f'        <li class="part">{escape(part)}</li>')
         when = "Planned" if planned else (s["status"] if m["number"] == 1 else "To follow")
         tools = "".join(f'<span class="chip">{escape(t)}</span>' for t in m["tools"])
         mods.append(f"""        <li class="module">

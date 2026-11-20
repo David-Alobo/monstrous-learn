@@ -8,18 +8,139 @@
       "folder": "series-1-cheminformatics-data-engineering",
       "number": 1,
       "title": "Data Engineering for Cheminformatics",
-      "tagline": "From SDF files and spreadsheets to a clean, searchable chemical database.",
+      "tagline": "From SDF files to chemical data pipelines that scale to millions of molecules, survive failures and can be trusted.",
       "status": "January 2027",
       "level": "For chemists who know some Python",
-      "summary": "Six modules that take a compound library from loose files to a checked, queryable database: structures stored as molecules in PostgreSQL, cleaned and standardised, enriched from ChEMBL and PubChem, validated before use, and ready for machine learning.",
-      "tools": ["Python", "pandas", "RDKit", "PostgreSQL + RDKit cartridge", "Pandera", "Parquet"],
+      "summary": "Eleven modules on the engineering that sits between raw chemical files and machine learning. Structures go into a real database; then the course turns to what breaks in practice: libraries too big for memory, jobs that need many cores, pipelines that fail halfway, data that drifts, and results nobody can reproduce. Each idea is built by hand first, so you understand it before Series 2 hands it to industry tools.",
+      "tools": [
+        "Python",
+        "pandas and PyArrow",
+        "RDKit",
+        "PostgreSQL + RDKit cartridge",
+        "DuckDB",
+        "Parquet",
+        "Dask",
+        "Pandera",
+        "Git, uv and Docker",
+        "DVC"
+      ],
       "modules": [
-        {"number": 1, "title": "From SDF files to a chemical database", "what": "Load a compound library into PostgreSQL with the RDKit cartridge, store structures as molecules, and search them by substructure and similarity in SQL.", "tools": ["PostgreSQL", "RDKit cartridge", "SQL"]},
-        {"number": 2, "title": "Cleaning and standardising molecules", "what": "Strip salts, neutralise charges and choose one tautomer, so the same compound is always stored the same way.", "tools": ["pandas", "RDKit MolStandardize"]},
-        {"number": 3, "title": "Pulling data from ChEMBL and PubChem", "what": "Fetch structures and bioactivity data through their web APIs, page by page and within their rate limits, and keep them as Parquet files.", "tools": ["Python", "ChEMBL and PubChem APIs", "Parquet"]},
-        {"number": 4, "title": "Checking data before it is used", "what": "Write data contracts for chemical tables (valid structures, sensible molecular weights, consistent units) and set failing rows aside for review.", "tools": ["Pandera", "RDKit"]},
-        {"number": 5, "title": "Fingerprints and descriptors at scale", "what": "Compute Morgan fingerprints and descriptors for large libraries in parallel, and store them for fast similarity searches.", "tools": ["RDKit", "multiprocessing", "Dask"]},
-        {"number": 6, "title": "Capstone: a screening-library pipeline", "what": "Take a raw vendor library through cleaning, PAINS filtering and checks into machine-learning-ready tables in PostgreSQL, end to end.", "tools": ["Everything above"]}
+        {
+          "number": 1,
+          "part": "Foundations",
+          "title": "Chemical data as data",
+          "what": "File formats (SDF, SMILES, CSV, Parquet), what each costs in space and time, and a stable identity for every molecule (InChIKey) so duplicates can be found.",
+          "tools": [
+            "RDKit",
+            "PyArrow",
+            "Parquet"
+          ]
+        },
+        {
+          "number": 2,
+          "part": "Foundations",
+          "title": "A chemical database",
+          "what": "Load a library into PostgreSQL with the RDKit cartridge, index it, search by substructure and similarity, read query plans, and use DuckDB for fast analysis.",
+          "tools": [
+            "PostgreSQL",
+            "RDKit cartridge",
+            "DuckDB"
+          ]
+        },
+        {
+          "number": 3,
+          "part": "Foundations",
+          "title": "Standardisation as a tested transformation",
+          "what": "Strip salts, neutralise charges and choose one tautomer as a pure, deterministic function with versioned rules and unit tests.",
+          "tools": [
+            "RDKit MolStandardize",
+            "pytest"
+          ]
+        },
+        {
+          "number": 4,
+          "part": "Scale",
+          "title": "Libraries larger than memory",
+          "what": "Stream molecules in batches instead of loading them all, write partitioned Parquet, and query far more rows than fit in memory; measure memory and throughput as you go.",
+          "tools": [
+            "PyArrow",
+            "Parquet",
+            "DuckDB"
+          ]
+        },
+        {
+          "number": 5,
+          "part": "Scale",
+          "title": "Parallel and distributed processing",
+          "what": "Spread standardisation and fingerprints across cores and machines: chunk sizes, passing SMILES instead of molecule objects, when parallel work stops helping, and a scaling curve.",
+          "tools": [
+            "multiprocessing",
+            "Dask"
+          ]
+        },
+        {
+          "number": 6,
+          "part": "Reliability",
+          "title": "Pipelines that survive failure",
+          "what": "Idempotent steps, checkpoints, resuming from the last good batch, retries with back-off, atomic writes, and quarantining bad molecules instead of crashing.",
+          "tools": [
+            "Python",
+            "PostgreSQL"
+          ]
+        },
+        {
+          "number": 7,
+          "part": "Reliability",
+          "title": "Incremental ingestion from ChEMBL and PubChem",
+          "what": "Fetch only what changed, page through APIs within their rate limits, cache responses, and run backfills safely.",
+          "tools": [
+            "ChEMBL and PubChem APIs",
+            "Parquet"
+          ]
+        },
+        {
+          "number": 8,
+          "part": "Reliability",
+          "title": "Data contracts and quality checks",
+          "what": "Check every batch against a contract (valid structures, sensible properties, units) and stop or quarantine when a batch fails.",
+          "tools": [
+            "Pandera",
+            "RDKit"
+          ]
+        },
+        {
+          "number": 9,
+          "part": "Reliability",
+          "title": "Versioning everything",
+          "what": "Version code, environments, database schemas, standardisation rules, datasets and results, so any number can be traced back and rebuilt exactly.",
+          "tools": [
+            "Git",
+            "uv",
+            "Docker",
+            "SQL migrations",
+            "DVC"
+          ]
+        },
+        {
+          "number": 10,
+          "part": "Reliability",
+          "title": "Monitoring pipelines",
+          "what": "Structured logs, run history, counts in and out that must reconcile, throughput and error rates, freshness, drift in molecular properties, and alerts when something goes wrong.",
+          "tools": [
+            "Python logging",
+            "PostgreSQL",
+            "alerts"
+          ]
+        },
+        {
+          "number": 11,
+          "part": "Capstone",
+          "title": "Capstone: a resumable, monitored pipeline over a large library",
+          "what": "Standardise, deduplicate, filter and fingerprint millions of molecules end to end; stop it halfway, resume it, version the output and show that every count reconciles.",
+          "tools": [
+            "Everything above"
+          ]
+        }
       ]
     },
     {
@@ -31,14 +152,58 @@
       "status": "Planned",
       "level": "After Series 1",
       "summary": "The tools data teams use in industry, applied to chemistry: declarative ingestion, a fast local warehouse, version-controlled transformations with lineage, scheduled pipelines and dashboards for medicinal chemists.",
-      "tools": ["dlt", "DuckDB", "dbt", "Prefect"],
+      "tools": [
+        "dlt",
+        "DuckDB",
+        "dbt",
+        "Prefect"
+      ],
       "modules": [
-        {"number": 1, "title": "Designing a lab data architecture", "what": "From folders and spreadsheets to a modular open-source stack.", "tools": []},
-        {"number": 2, "title": "Declarative ingestion", "what": "Load chemical APIs and lab exports incrementally, coping with changing schemas.", "tools": ["dlt"]},
-        {"number": 3, "title": "A fast analytical warehouse", "what": "Query millions of descriptors locally with DuckDB and Parquet.", "tools": ["DuckDB", "Parquet"]},
-        {"number": 4, "title": "Transformations with lineage", "what": "Version-controlled models joining structures with assay results.", "tools": ["dbt"]},
-        {"number": 5, "title": "Scheduled pipelines", "what": "Run standardisation and fingerprint updates automatically when new data arrives.", "tools": ["Prefect"]},
-        {"number": 6, "title": "Structure-activity dashboards", "what": "Interactive views of structure-activity relationships for medicinal chemists.", "tools": []}
+        {
+          "number": 1,
+          "title": "Designing a lab data architecture",
+          "what": "From folders and spreadsheets to a modular open-source stack.",
+          "tools": []
+        },
+        {
+          "number": 2,
+          "title": "Declarative ingestion",
+          "what": "Load chemical APIs and lab exports incrementally, coping with changing schemas.",
+          "tools": [
+            "dlt"
+          ]
+        },
+        {
+          "number": 3,
+          "title": "A fast analytical warehouse",
+          "what": "Query millions of descriptors locally with DuckDB and Parquet.",
+          "tools": [
+            "DuckDB",
+            "Parquet"
+          ]
+        },
+        {
+          "number": 4,
+          "title": "Transformations with lineage",
+          "what": "Version-controlled models joining structures with assay results.",
+          "tools": [
+            "dbt"
+          ]
+        },
+        {
+          "number": 5,
+          "title": "Scheduled pipelines",
+          "what": "Run standardisation and fingerprint updates automatically when new data arrives.",
+          "tools": [
+            "Prefect"
+          ]
+        },
+        {
+          "number": 6,
+          "title": "Structure-activity dashboards",
+          "what": "Interactive views of structure-activity relationships for medicinal chemists.",
+          "tools": []
+        }
       ]
     },
     {
@@ -50,15 +215,69 @@
       "status": "Planned",
       "level": "After Series 1 and 2",
       "summary": "What it takes to move data safely between molecular design, robotic synthesis and analysis: checks before synthesis, reaction metadata, instrument data, pipeline monitoring and a small intake service.",
-      "tools": ["RDKit", "Pandera", "Prefect", "FastAPI", "PostgreSQL"],
+      "tools": [
+        "RDKit",
+        "Pandera",
+        "Prefect",
+        "FastAPI",
+        "PostgreSQL"
+      ],
       "modules": [
-        {"number": 1, "title": "From design to make", "what": "Why moving from a virtual library to robotic synthesis is a data problem.", "tools": []},
-        {"number": 2, "title": "Checking molecules before synthesis", "what": "An intake check for stereocentres, salts and unstable groups.", "tools": ["RDKit"]},
-        {"number": 3, "title": "Reaction and synthesis metadata", "what": "Relational tables for conditions, building blocks, yields and purity.", "tools": ["PostgreSQL"]},
-        {"number": 4, "title": "Instrument data back into the pipeline", "what": "Parse LC-MS and NMR exports into structured tables to confirm what was made.", "tools": ["mzML"]},
-        {"number": 5, "title": "Monitoring lab data pipelines", "what": "Catch schema drift, missing readings and corrupted values before they reach a model.", "tools": ["Pandera", "Prefect"]},
-        {"number": 6, "title": "A chemical intake service", "what": "Wrap the checks and structure previews in a small web API.", "tools": ["FastAPI"]},
-        {"number": 7, "title": "Capstone: a closed-loop pipeline", "what": "Validate targets, log metadata, check analytical results and update the dataset safely.", "tools": ["Everything above"]}
+        {
+          "number": 1,
+          "title": "From design to make",
+          "what": "Why moving from a virtual library to robotic synthesis is a data problem.",
+          "tools": []
+        },
+        {
+          "number": 2,
+          "title": "Checking molecules before synthesis",
+          "what": "An intake check for stereocentres, salts and unstable groups.",
+          "tools": [
+            "RDKit"
+          ]
+        },
+        {
+          "number": 3,
+          "title": "Reaction and synthesis metadata",
+          "what": "Relational tables for conditions, building blocks, yields and purity.",
+          "tools": [
+            "PostgreSQL"
+          ]
+        },
+        {
+          "number": 4,
+          "title": "Instrument data back into the pipeline",
+          "what": "Parse LC-MS and NMR exports into structured tables to confirm what was made.",
+          "tools": [
+            "mzML"
+          ]
+        },
+        {
+          "number": 5,
+          "title": "Monitoring lab data pipelines",
+          "what": "Catch schema drift, missing readings and corrupted values before they reach a model.",
+          "tools": [
+            "Pandera",
+            "Prefect"
+          ]
+        },
+        {
+          "number": 6,
+          "title": "A chemical intake service",
+          "what": "Wrap the checks and structure previews in a small web API.",
+          "tools": [
+            "FastAPI"
+          ]
+        },
+        {
+          "number": 7,
+          "title": "Capstone: a closed-loop pipeline",
+          "what": "Validate targets, log metadata, check analytical results and update the dataset safely.",
+          "tools": [
+            "Everything above"
+          ]
+        }
       ]
     }
   ]

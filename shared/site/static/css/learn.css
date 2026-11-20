@@ -128,3 +128,6 @@ a.course:hover { border-color: var(--violet); transform: translateY(-2px); }
   .module .when { grid-column: 2; }
   .site-footer .foot { grid-template-columns: 1fr 1fr; }
 }
+/* a course's parts: a heading over each group of modules */
+.modules .part { font: 500 0.78rem var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--violet); margin: 1rem 0 -0.2rem; }
+.modules .part:first-child { margin-top: 0; }

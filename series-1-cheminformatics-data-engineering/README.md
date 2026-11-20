@@ -1,19 +1,35 @@
 # Series 1: Data Engineering for Cheminformatics
 
-From SDF files and spreadsheets to a clean, searchable chemical database.
+From SDF files to chemical data pipelines that scale to millions of molecules, survive failures and can be trusted.
 
 **Status:** opens January 2027 · **Level:** For chemists who know some Python
 
-Six modules that take a compound library from loose files to a checked, queryable database: structures stored as molecules in PostgreSQL, cleaned and standardised, enriched from ChEMBL and PubChem, validated before use, and ready for machine learning.
+Eleven modules on the engineering that sits between raw chemical files and machine learning. Structures go into a real database; then the course turns to what breaks in practice: libraries too big for memory, jobs that need many cores, pipelines that fail halfway, data that drifts, and results nobody can reproduce. Each idea is built by hand first, so you understand it before Series 2 hands it to industry tools.
 
 ## Modules
 
-1. **From SDF files to a chemical database.** Load a compound library into PostgreSQL with the RDKit cartridge, store structures as molecules, and search them by substructure and similarity in SQL. (PostgreSQL, RDKit cartridge, SQL)
-2. **Cleaning and standardising molecules.** Strip salts, neutralise charges and choose one tautomer, so the same compound is always stored the same way. (pandas, RDKit MolStandardize)
-3. **Pulling data from ChEMBL and PubChem.** Fetch structures and bioactivity data through their web APIs, page by page and within their rate limits, and keep them as Parquet files. (Python, ChEMBL and PubChem APIs, Parquet)
-4. **Checking data before it is used.** Write data contracts for chemical tables (valid structures, sensible molecular weights, consistent units) and set failing rows aside for review. (Pandera, RDKit)
-5. **Fingerprints and descriptors at scale.** Compute Morgan fingerprints and descriptors for large libraries in parallel, and store them for fast similarity searches. (RDKit, multiprocessing, Dask)
-6. **Capstone: a screening-library pipeline.** Take a raw vendor library through cleaning, PAINS filtering and checks into machine-learning-ready tables in PostgreSQL, end to end. (Everything above)
+### Foundations
+
+1. **Chemical data as data.** File formats (SDF, SMILES, CSV, Parquet), what each costs in space and time, and a stable identity for every molecule (InChIKey) so duplicates can be found. (RDKit, PyArrow, Parquet)
+2. **A chemical database.** Load a library into PostgreSQL with the RDKit cartridge, index it, search by substructure and similarity, read query plans, and use DuckDB for fast analysis. (PostgreSQL, RDKit cartridge, DuckDB)
+3. **Standardisation as a tested transformation.** Strip salts, neutralise charges and choose one tautomer as a pure, deterministic function with versioned rules and unit tests. (RDKit MolStandardize, pytest)
+
+### Scale
+
+4. **Libraries larger than memory.** Stream molecules in batches instead of loading them all, write partitioned Parquet, and query far more rows than fit in memory; measure memory and throughput as you go. (PyArrow, Parquet, DuckDB)
+5. **Parallel and distributed processing.** Spread standardisation and fingerprints across cores and machines: chunk sizes, passing SMILES instead of molecule objects, when parallel work stops helping, and a scaling curve. (multiprocessing, Dask)
+
+### Reliability
+
+6. **Pipelines that survive failure.** Idempotent steps, checkpoints, resuming from the last good batch, retries with back-off, atomic writes, and quarantining bad molecules instead of crashing. (Python, PostgreSQL)
+7. **Incremental ingestion from ChEMBL and PubChem.** Fetch only what changed, page through APIs within their rate limits, cache responses, and run backfills safely. (ChEMBL and PubChem APIs, Parquet)
+8. **Data contracts and quality checks.** Check every batch against a contract (valid structures, sensible properties, units) and stop or quarantine when a batch fails. (Pandera, RDKit)
+9. **Versioning everything.** Version code, environments, database schemas, standardisation rules, datasets and results, so any number can be traced back and rebuilt exactly. (Git, uv, Docker, SQL migrations, DVC)
+10. **Monitoring pipelines.** Structured logs, run history, counts in and out that must reconcile, throughput and error rates, freshness, drift in molecular properties, and alerts when something goes wrong. (Python logging, PostgreSQL, alerts)
+
+### Capstone
+
+11. **Capstone: a resumable, monitored pipeline over a large library.** Standardise, deduplicate, filter and fingerprint millions of molecules end to end; stop it halfway, resume it, version the output and show that every count reconciles. (Everything above)
 
 Each module will have its own folder here (`01-…`, `02-…`) with its code, tests, lesson and
 notebook. The outline is kept in step with `shared/site/catalogue.json`, which builds the course

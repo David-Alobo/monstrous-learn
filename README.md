@@ -7,7 +7,7 @@ and the pages themselves.
 
 | Series | Course | Status |
 |---|---|---|
-| 1 | [Data Engineering for Cheminformatics](series-1-cheminformatics-data-engineering/) | Opens January 2027 |
+| 1 | [Data Engineering for Cheminformatics](series-1-cheminformatics-data-engineering/): foundations, scale, reliability | Opens January 2027 |
 | 2 | [The Modern Data Stack for Chemistry](series-2-modern-data-stack/) | Planned |
 | 3 | [Data Pipelines for Digital and Autonomous Chemistry](series-3-autonomous-chemistry/) | Planned |
 
