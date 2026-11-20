@@ -71,6 +71,35 @@
     (() => {
       const b = document.querySelector(".site-menu"), d = document.getElementById("site-drawer");
       b.onclick = () => { const open = d.hidden; d.hidden = !open; b.setAttribute("aria-expanded", String(open)); };
+      // a Copy button on every code block: copies the code exactly, ready to paste into Python
+      for (const block of document.querySelectorAll(".lesson .hl")) {
+        const pre = block.querySelector("pre");
+        if (!pre) continue;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "copy";
+        btn.textContent = "Copy";
+        btn.setAttribute("aria-label", "Copy this code");
+        btn.onclick = async () => {
+          const code = pre.innerText.replace(/\n$/, "");
+          try {
+            await navigator.clipboard.writeText(code);
+          } catch {
+            // older browsers, or pages opened from a file: select the text instead
+            const range = document.createRange();
+            range.selectNodeContents(pre);
+            const sel = getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            document.execCommand("copy");
+            sel.removeAllRanges();
+          }
+          btn.textContent = "Copied ✓";
+          btn.classList.add("done");
+          setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("done"); }, 1600);
+        };
+        block.appendChild(btn);
+      }
     })();
   </script>
 </body>

@@ -171,3 +171,9 @@ a.course:hover { border-color: var(--violet); transform: translateY(-2px); }
 .toc code { font: 0.85em var(--mono); }
 .next .soon { color: var(--ink-3); font: 500 0.92rem var(--heading); }
 @media (max-width: 900px) { .lesson-split { grid-template-columns: 1fr; } .toc { order: -1; } }
+/* the Copy button on every code block */
+.lesson .hl { position: relative; }
+.lesson .hl .copy { position: absolute; top: 8px; right: 8px; font: 600 0.75rem var(--body); color: var(--ink-2); background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; cursor: pointer; opacity: 0.85; }
+.lesson .hl .copy:hover { opacity: 1; color: var(--ink); border-color: var(--violet); }
+.lesson .hl .copy.done { color: var(--cyan); border-color: var(--cyan); }
+.lesson .hl .copy:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
