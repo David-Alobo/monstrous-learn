@@ -131,3 +131,5 @@ a.course:hover { border-color: var(--violet); transform: translateY(-2px); }
 /* a course's parts: a heading over each group of modules */
 .modules .part { font: 500 0.78rem var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--violet); margin: 1rem 0 -0.2rem; }
 .modules .part:first-child { margin-top: 0; }
+.note { font-size: 0.9rem; color: var(--ink-3); margin-top: 1rem; }
+.grid.four { grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); }

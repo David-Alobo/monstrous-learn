@@ -32,6 +32,10 @@ ICONS = {
     "run": '<path d="M4 4h16v12H4zM8 20h8M12 16v4M8 9l2 2-2 2M12 13h4"/>',
     "check": '<path d="M9 12l2 2 4-4M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/>',
     "team": '<path d="M8 7a3 3 0 106 0 3 3 0 00-6 0M3 21v-2a4 4 0 014-4h8a4 4 0 014 4v2"/>',
+    "calendar": '<path d="M4 6h16v14H4zM4 10h16M8 3v4M16 3v4"/>',
+    "task": '<path d="M9 5h10M9 12h10M9 19h10M4 5l1 1 2-2M4 12l1 1 2-2M4 19l1 1 2-2"/>',
+    "chat": '<path d="M4 5h16v11H9l-5 4zM8 9h8M8 12h5"/>',
+    "award": '<path d="M12 3a6 6 0 100 12 6 6 0 000-12zM8.5 14L7 21l5-3 5 3-1.5-7"/>',
 }
 
 
@@ -142,6 +146,7 @@ def intro(cat: dict) -> str:
         The page body.
     """
     first = cat["series"][0]
+    cohort = cat["cohort"]
     cards = "\n".join(course_card(cat, s) for s in cat["series"])
     return f"""    <section class="wrap hero">
       <p class="eyebrow">Monstrous Data · Learn</p>
@@ -164,9 +169,9 @@ def intro(cat: dict) -> str:
       <div class="grid">
         <div class="card">{icon("read")}<h3>Read</h3><p>Each module is one page: the problem,
           the idea, and the code, with diagrams where they help.</p></div>
-        <div class="card">{icon("run")}<h3>Run</h3><p>Three ways to follow: a ready-made Docker
-          setup, a notebook that runs online with nothing to install, or small exercises in the
-          browser.</p></div>
+        <div class="card">{icon("run")}<h3>Run, on any device</h3><p>Read on a phone, tablet or
+          laptop. Code in the browser, with the whole setup (database included) running online, or
+          on your own Windows, macOS or Linux computer. Nothing to buy.</p></div>
         <div class="card">{icon("check")}<h3>Check</h3><p>Every example is tested before it is
           published, and all the code is open: compare your results with ours.</p></div>
       </div>
@@ -181,6 +186,28 @@ def intro(cat: dict) -> str:
       </div>
     </section>
 
+    <section class="wrap" id="cohort">
+      <p class="eyebrow">Learn together</p>
+      <h2>How the cohort works</h2>
+      <p>Each course runs once as a group, starting on a set date, and then stays open to follow
+        at your own pace.</p>
+      <div class="grid four">
+        <div class="card">{icon("calendar")}
+          <h3>One module a {cohort["cadence"].removesuffix("ly")}</h3>
+          <p>From the start in {escape(cohort["start"])}, a new module every
+          {cohort["cadence"].removesuffix("ly")}, so the group moves together.</p></div>
+        <div class="card">{icon("task")}<h3>Homework</h3><p>A few questions per module, answered by
+          running the code. The answers are published after each deadline.</p></div>
+        <div class="card">{icon("chat")}<h3>{escape(cohort["community"])} community</h3><p>Ask
+          questions, help others and share your progress. The invitation comes with the waitlist
+          email.</p></div>
+        <div class="card">{icon("award")}<h3>Certificate</h3><p>Finish the capstone during a cohort;
+          three fellow learners review it, and a pass earns a certificate.</p></div>
+      </div>
+      <p class="note">Joining later? Every module stays open. Take the capstone with the next
+        cohort to earn the certificate.</p>
+    </section>
+
     <section class="wrap" id="who">
       <p class="eyebrow">Who it is for</p>
       <h2>Chemists who work with data</h2>
@@ -189,8 +216,8 @@ def intro(cat: dict) -> str:
           researcher who has written some Python (loops, functions, pandas) and wants your data to
           be organised, searchable and trustworthy.</p></div>
         <div class="card"><h3>You do not need</h3><p>a computer science degree, a server, or
-          paid software. Everything used is open source, and the first modules run on a
-          laptop.</p></div>
+          paid software. Everything used is open source, and every module runs in a browser
+          or on an ordinary laptop.</p></div>
         <div class="card">{icon("team")}<h3>For teams</h3><p>Workshops for research groups and
           R&amp;D teams, and help with your own lab data.
           <a href="https://monstrous.com.ng/contact/">Discuss a project</a>.</p></div>
@@ -243,7 +270,8 @@ def course(cat: dict, k: int) -> str:
     cadence = (
         "This course is planned: the outline may change. Join the waitlist to hear when it opens."
         if planned
-        else f"Module 1 opens in {escape(s['status'])}; a new module follows every two weeks."
+        else f"Module 1 opens in {escape(s['status'])}, then one a week: join the cohort or "
+        "follow at your own pace."
     )
     return f"""    <section class="wrap hero">
       <p class="crumbs"><a href="{cat["base"]}">All courses</a> / Series {s["number"]}</p>
@@ -268,14 +296,58 @@ def course(cat: dict, k: int) -> str:
           <h3>What you will use</h3>
           <ul>{tools}</ul>
           <h3>How to follow</h3>
-          <ul><li>Docker: the full setup on your computer</li><li>Online notebook: nothing to
-            install</li><li>Small exercises in the browser</li></ul>
+          <ul><li>In the browser, on any device: the full setup runs online</li><li>On your own
+            computer: Windows, macOS or Linux</li><li>Large runs (optional): a server or cloud
+            machine</li></ul>
+          <h3>Learn together</h3>
+          <ul><li>A cohort, one module a week</li><li>Homework and a Discord community</li>
+            <li>A certificate for the capstone</li></ul>
           <a class="btn primary" href="{WAITLIST}">Join the waitlist</a>
         </aside>
       </div>
       <nav class="next" aria-label="Other courses">{prev}{nxt}</nav>
     </section>
 """
+
+
+def readme(s: dict) -> str:
+    """A course folder's README, written from the catalogue so the two never disagree.
+
+    Args:
+        s: The course.
+
+    Returns:
+        The README text.
+    """
+    status = s["status"] if s["status"] == "Planned" else f"opens {s['status']}"
+    lines = [
+        f"# Series {s['number']}: {s['title']}",
+        "",
+        s["tagline"],
+        "",
+        f"**Status:** {status} · **Level:** {s['level']}",
+        "",
+        s["summary"],
+        "",
+        "## Modules",
+    ]
+    part = None
+    for m in s["modules"]:
+        if m.get("part") and m["part"] != part:
+            part = m["part"]
+            lines += ["", f"### {part}", ""]
+        elif part is None and m is s["modules"][0]:
+            lines.append("")
+        tools = f" ({', '.join(m['tools'])})" if m["tools"] else ""
+        lines.append(f"{m['number']}. **{m['title']}.** {m['what']}{tools}")
+    lines += [
+        "",
+        "Each module will have its own folder here (`01-…`, `02-…`) with its code, tests, lesson",
+        "and notebook. This file is written from `shared/site/catalogue.json` by",
+        "`python -m shared.site.build`; the course page is",
+        f"https://monstrous.com.ng/learn/{s['slug']}/.",
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def build(out: Path = DIST) -> list[Path]:
@@ -314,6 +386,8 @@ def build(out: Path = DIST) -> list[Path]:
             course(cat, k),
             s["slug"],
         )
+    for s in cat["series"]:
+        Path(s["folder"], "README.md").write_text(readme(s), encoding="utf-8", newline="\n")
     for path, html in pages.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         html = html.replace("assets/css/learn.css", f"assets/css/learn.css?v={stamp}")

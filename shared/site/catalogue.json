@@ -11,7 +11,7 @@
       "tagline": "From SDF files to chemical data pipelines that scale to millions of molecules, survive failures and can be trusted.",
       "status": "January 2027",
       "level": "For chemists who know some Python",
-      "summary": "Eleven modules on the engineering that sits between raw chemical files and machine learning. Structures go into a real database; then the course turns to what breaks in practice: libraries too big for memory, jobs that need many cores, pipelines that fail halfway, data that drifts, and results nobody can reproduce. Each idea is built by hand first, so you understand it before Series 2 hands it to industry tools.",
+      "summary": "Thirteen modules on the engineering that sits between raw chemical files and machine learning. It starts with how molecules are represented and stored in a real database; then the course turns to what breaks in practice: libraries too big for memory, jobs that need many cores, pipelines that fail halfway, data that drifts, and results nobody can reproduce. Each idea is built by hand first, so you understand it before Series 2 hands it to industry tools.",
       "tools": [
         "Python",
         "pandas and PyArrow",
@@ -28,8 +28,17 @@
         {
           "number": 1,
           "part": "Foundations",
-          "title": "Chemical data as data",
-          "what": "File formats (SDF, SMILES, CSV, Parquet), what each costs in space and time, and a stable identity for every molecule (InChIKey) so duplicates can be found.",
+          "title": "Representing molecules",
+          "what": "How a computer holds a molecule: SMILES (canonical and isomeric), InChI and InChIKey, connection tables in molfiles and SDF, molecular graphs, 3D conformers, SMARTS patterns, fingerprints and descriptors; what each keeps, what each loses (stereochemistry, tautomers, aromaticity), and which to store for which job.",
+          "tools": [
+            "RDKit"
+          ]
+        },
+        {
+          "number": 2,
+          "part": "Foundations",
+          "title": "Chemical files and identity",
+          "what": "The files molecules travel in (SDF, SMILES, CSV, Parquet), what each costs in space and time, and a stable identity for every molecule (InChIKey) so duplicates can be found.",
           "tools": [
             "RDKit",
             "PyArrow",
@@ -37,7 +46,7 @@
           ]
         },
         {
-          "number": 2,
+          "number": 3,
           "part": "Foundations",
           "title": "A chemical database",
           "what": "Load a library into PostgreSQL with the RDKit cartridge, index it, search by substructure and similarity, read query plans, and use DuckDB for fast analysis.",
@@ -48,7 +57,16 @@
           ]
         },
         {
-          "number": 3,
+          "part": "Foundations",
+          "title": "Validating molecules",
+          "what": "Catch broken structures before they spread: parsing and sanitisation errors, impossible valences, unexpected elements and charges, missing or contradictory stereochemistry, size limits; decide what to fix, what to reject and how to record why.",
+          "tools": [
+            "RDKit"
+          ],
+          "number": 4
+        },
+        {
+          "number": 5,
           "part": "Foundations",
           "title": "Standardisation as a tested transformation",
           "what": "Strip salts, neutralise charges and choose one tautomer as a pure, deterministic function with versioned rules and unit tests.",
@@ -58,7 +76,7 @@
           ]
         },
         {
-          "number": 4,
+          "number": 6,
           "part": "Scale",
           "title": "Libraries larger than memory",
           "what": "Stream molecules in batches instead of loading them all, write partitioned Parquet, and query far more rows than fit in memory; measure memory and throughput as you go.",
@@ -69,7 +87,7 @@
           ]
         },
         {
-          "number": 5,
+          "number": 7,
           "part": "Scale",
           "title": "Parallel and distributed processing",
           "what": "Spread standardisation and fingerprints across cores and machines: chunk sizes, passing SMILES instead of molecule objects, when parallel work stops helping, and a scaling curve.",
@@ -79,7 +97,7 @@
           ]
         },
         {
-          "number": 6,
+          "number": 8,
           "part": "Reliability",
           "title": "Pipelines that survive failure",
           "what": "Idempotent steps, checkpoints, resuming from the last good batch, retries with back-off, atomic writes, and quarantining bad molecules instead of crashing.",
@@ -89,7 +107,7 @@
           ]
         },
         {
-          "number": 7,
+          "number": 9,
           "part": "Reliability",
           "title": "Incremental ingestion from ChEMBL and PubChem",
           "what": "Fetch only what changed, page through APIs within their rate limits, cache responses, and run backfills safely.",
@@ -99,17 +117,18 @@
           ]
         },
         {
-          "number": 8,
+          "number": 10,
           "part": "Reliability",
-          "title": "Data contracts and quality checks",
-          "what": "Check every batch against a contract (valid structures, sensible properties, units) and stop or quarantine when a batch fails.",
+          "title": "Validating data: contracts and quality checks",
+          "what": "Check every batch against a written contract: column types, required fields, value ranges, units (nM, µM, pIC50), duplicates, links between tables, and counts that agree across sources; stop or quarantine a batch that fails, and report why.",
           "tools": [
             "Pandera",
-            "RDKit"
+            "RDKit",
+            "PostgreSQL"
           ]
         },
         {
-          "number": 9,
+          "number": 11,
           "part": "Reliability",
           "title": "Versioning everything",
           "what": "Version code, environments, database schemas, standardisation rules, datasets and results, so any number can be traced back and rebuilt exactly.",
@@ -122,7 +141,7 @@
           ]
         },
         {
-          "number": 10,
+          "number": 12,
           "part": "Reliability",
           "title": "Monitoring pipelines",
           "what": "Structured logs, run history, counts in and out that must reconcile, throughput and error rates, freshness, drift in molecular properties, and alerts when something goes wrong.",
@@ -133,7 +152,7 @@
           ]
         },
         {
-          "number": 11,
+          "number": 13,
           "part": "Capstone",
           "title": "Capstone: a resumable, monitored pipeline over a large library",
           "what": "Standardise, deduplicate, filter and fingerprint millions of molecules end to end; stop it halfway, resume it, version the output and show that every count reconciles.",
@@ -280,5 +299,10 @@
         }
       ]
     }
-  ]
+  ],
+  "cohort": {
+    "start": "January 2027",
+    "cadence": "weekly",
+    "community": "Discord"
+  }
 }

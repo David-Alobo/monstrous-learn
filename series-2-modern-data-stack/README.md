@@ -15,6 +15,7 @@ The tools data teams use in industry, applied to chemistry: declarative ingestio
 5. **Scheduled pipelines.** Run standardisation and fingerprint updates automatically when new data arrives. (Prefect)
 6. **Structure-activity dashboards.** Interactive views of structure-activity relationships for medicinal chemists.
 
-Each module will have its own folder here (`01-…`, `02-…`) with its code, tests, lesson and
-notebook. The outline is kept in step with `shared/site/catalogue.json`, which builds the course
-page at https://monstrous.com.ng/learn/series-2/.
+Each module will have its own folder here (`01-…`, `02-…`) with its code, tests, lesson
+and notebook. This file is written from `shared/site/catalogue.json` by
+`python -m shared.site.build`; the course page is
+https://monstrous.com.ng/learn/series-2/.

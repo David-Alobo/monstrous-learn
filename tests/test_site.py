@@ -60,3 +60,8 @@ def test_stylesheet_address_is_versioned(site):
     out, pages = site
     for page in pages:
         assert re.search(r"learn\.css\?v=[0-9a-f]{10}", page.read_text(encoding="utf-8"))
+
+
+def test_course_readmes_follow_the_catalogue():
+    for s in CAT["series"]:
+        assert Path(s["folder"], "README.md").read_text(encoding="utf-8") == build.readme(s)

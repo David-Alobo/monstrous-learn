@@ -16,6 +16,7 @@ What it takes to move data safely between molecular design, robotic synthesis an
 6. **A chemical intake service.** Wrap the checks and structure previews in a small web API. (FastAPI)
 7. **Capstone: a closed-loop pipeline.** Validate targets, log metadata, check analytical results and update the dataset safely. (Everything above)
 
-Each module will have its own folder here (`01-…`, `02-…`) with its code, tests, lesson and
-notebook. The outline is kept in step with `shared/site/catalogue.json`, which builds the course
-page at https://monstrous.com.ng/learn/series-3/.
+Each module will have its own folder here (`01-…`, `02-…`) with its code, tests, lesson
+and notebook. This file is written from `shared/site/catalogue.json` by
+`python -m shared.site.build`; the course page is
+https://monstrous.com.ng/learn/series-3/.

@@ -11,6 +11,19 @@ and the pages themselves.
 | 2 | [The Modern Data Stack for Chemistry](series-2-modern-data-stack/) | Planned |
 | 3 | [Data Pipelines for Digital and Autonomous Chemistry](series-3-autonomous-chemistry/) | Planned |
 
+## Any device
+
+Every lesson reads well on a phone, tablet or laptop, and every module can be run in a browser
+(the whole setup, database included, runs online) or on Windows, macOS or Linux. Nothing in a
+module may depend on one operating system, a paid tool or a powerful computer; the larger runs are
+optional and say so.
+
+## How the course runs
+
+A cohort starts on a set date and takes one module a week, with homework, a Discord community and
+a peer-reviewed capstone that earns a certificate. Afterwards every module stays open to follow at
+your own pace.
+
 ## How the repository is organised
 
 ```
