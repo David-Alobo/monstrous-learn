@@ -5,7 +5,7 @@ import re
 
 import pytest
 
-from shared.site import build
+from shared.site import build, lessons
 
 CAT = build.load()
 TRACKS = CAT["tracks"]
@@ -37,6 +37,12 @@ def test_one_page_per_track_and_course_and_a_home(site):
     want = {out / "learn/index.html"}
     want |= {out / f"learn/{t['slug']}/index.html" for t in TRACKS}
     want |= {out / f"learn/{t['slug']}/{s['slug']}/index.html" for t, s in SERIES}
+    want |= {
+        out / f"learn/{t['slug']}/{s['slug']}/{folder.name}/index.html"
+        for t, s in SERIES
+        for m in s["modules"]
+        if (folder := lessons.folder(s["folder"], m["number"]))
+    }
     assert set(pages) == want
 
 
@@ -72,3 +78,14 @@ def test_stylesheet_address_is_versioned(site):
 def test_readmes_follow_the_catalogue():
     for path, text in build.readmes(CAT).items():
         assert path.read_text(encoding="utf-8") == text, path
+
+
+def test_lesson_pages_show_their_figures_and_further_reading(site):
+    out, pages = site
+    lesson_pages = [p for p in pages if p.parent.name[:2].isdigit()]
+    assert lesson_pages, "no lesson pages were built"
+    for page in lesson_pages:
+        html = page.read_text(encoding="utf-8")
+        assert 'id="further-reading"' in html
+        for src in re.findall(r'<img alt="[^"]*" src="(figures/[^"]+)"', html):
+            assert (page.parent / src).exists(), (page, src)

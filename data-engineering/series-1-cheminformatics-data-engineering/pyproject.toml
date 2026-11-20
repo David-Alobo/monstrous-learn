@@ -1,0 +1,25 @@
+[project]
+name = "monstrous-learn-series-1"
+version = "0.1.0"
+description = "Series 1: Data Engineering for Cheminformatics. The code, tests and figures of every module."
+requires-python = ">=3.11"
+dependencies = [
+    "rdkit>=2024.9",
+    "networkx>=3.3",
+    "pandas>=2.2",
+    "pyarrow>=17",
+]
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+python_files = ["test_*.py"]

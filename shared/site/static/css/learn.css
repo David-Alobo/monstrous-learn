@@ -138,3 +138,36 @@ a.course:hover { border-color: var(--violet); transform: translateY(-2px); }
 .learn-wrap a.track ~ a.track { margin-left: 10px; }
 .track-card .ico { width: 34px; height: 34px; }
 .card.soon { max-width: 40rem; margin-top: 1rem; }
+
+/* ==== lessons: the article, its code and outputs, figures, tables and contents panel ==== */
+.module .read { display: inline-block; margin-top: 0.6rem; font: 600 0.9rem var(--heading); text-decoration: none; }
+.module.ready { border-color: rgb(167 139 250 / 0.55); }
+.module h3 a { color: var(--ink); text-decoration: none; }
+.module h3 a:hover { color: var(--violet); }
+.lesson-split { grid-template-columns: minmax(0, 1fr) 15rem; }
+.lesson { min-width: 0; font-size: 1.02rem; }
+.lesson h2 { margin: 2.6rem 0 0.8rem; scroll-margin-top: 64px; }
+.lesson h2:first-child { margin-top: 0; }
+.lesson ul, .lesson ol { padding-left: 1.3rem; }
+.lesson li { margin: 0.25rem 0; }
+.lesson strong { color: var(--ink); }
+.lesson code { font: 0.9em var(--mono); background: var(--panel-2); border: 1px solid var(--line); border-radius: 5px; padding: 0.05em 0.35em; color: var(--ink); }
+.lesson .hl { margin: 1rem 0 0; border: 1px solid var(--line); border-radius: 12px 12px 0 0; overflow-x: auto; }
+.lesson .hl pre { margin: 0; padding: 1rem 1.1rem; font: 0.86rem/1.55 var(--mono); }
+.lesson .hl code { background: none; border: 0; padding: 0; }
+.lesson .hl + p, .lesson .hl + figure { margin-top: 1rem; }
+.lesson .output { margin: 0 0 1.2rem; border: 1px solid var(--line); border-top: 0; border-radius: 0 0 12px 12px; background: #0b0d14; }
+.lesson .output span { display: block; font: 500 0.68rem var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--cyan); padding: 0.55rem 1.1rem 0; }
+.lesson .output pre { margin: 0; padding: 0.35rem 1.1rem 0.9rem; font: 0.84rem/1.5 var(--mono); color: var(--ink-2); overflow-x: auto; white-space: pre; }
+.lesson figure { margin: 1.4rem 0; }
+.lesson figure img { display: block; max-width: 100%; height: auto; background: #fff; border-radius: 12px; padding: 6px; margin: 0 auto; }
+.lesson figcaption { font-size: 0.86rem; color: var(--ink-3); margin-top: 0.5rem; text-align: center; }
+.lesson table { border-collapse: collapse; width: 100%; font-size: 0.9rem; margin: 1rem 0 1.4rem; display: block; overflow-x: auto; }
+.lesson th, .lesson td { border: 1px solid var(--line); padding: 0.5rem 0.7rem; text-align: left; vertical-align: top; }
+.lesson th { background: var(--panel-2); color: var(--ink); font-weight: 600; }
+.toc .contents { list-style: none; margin: 0 0 1rem; padding: 0; font-size: 0.9rem; display: grid; gap: 0.35rem; }
+.toc .contents a { color: var(--ink-2); text-decoration: none; }
+.toc .contents a:hover { color: var(--violet); }
+.toc code { font: 0.85em var(--mono); }
+.next .soon { color: var(--ink-3); font: 500 0.92rem var(--heading); }
+@media (max-width: 900px) { .lesson-split { grid-template-columns: 1fr; } .toc { order: -1; } }

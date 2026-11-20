@@ -24,6 +24,8 @@ import zipfile
 from html import escape
 from pathlib import Path
 
+from . import lessons
+
 HERE = Path(__file__).parent
 CATALOGUE = HERE / "catalogue.json"
 FRAME = HERE / "templates" / "frame.html"
@@ -365,10 +367,19 @@ def course(cat: dict, i: int, k: int) -> str:
             mods.append(f'        <li class="part">{escape(part)}</li>')
         when = "Planned" if planned else (s["status"] if m["number"] == 1 else "To follow")
         tools = "".join(f'<span class="chip">{escape(x)}</span>' for x in m["tools"])
-        mods.append(f"""        <li class="module">
+        lesson = lessons.folder(s["folder"], m["number"])
+        title = escape(m["title"])
+        if lesson:
+            title = f'<a href="{url(cat, t, s)}{lesson.name}/">{title}</a>'
+        read = (
+            f'<a class="read" href="{url(cat, t, s)}{lesson.name}/">Read the lesson →</a>'
+            if lesson
+            else ""
+        )
+        mods.append(f"""        <li class="module{" ready" if lesson else ""}">
           <span class="mn">{m["number"]}</span>
-          <div><h3>{escape(m["title"])}</h3><p>{escape(m["what"])}</p>
-            <div class="tools">{tools}</div></div>
+          <div><h3>{title}</h3><p>{escape(m["what"])}</p>
+            <div class="tools">{tools}</div>{read}</div>
           <span class="when">{escape(when)}</span>
         </li>""")
     tools = "".join(f"<li>{escape(x)}</li>" for x in s["tools"])
@@ -425,6 +436,70 @@ def course(cat: dict, i: int, k: int) -> str:
         </aside>
       </div>
       <nav class="next" aria-label="Other courses">{prev}{nxt}</nav>
+    </section>
+"""
+
+
+def lesson_page(cat: dict, t: dict, s: dict, m: dict, html: str, toc: list, summary: str) -> str:
+    """A module's lesson page: the lesson, a contents panel, and the modules either side.
+
+    Args:
+        cat: The catalogue.
+        t: The track.
+        s: The series.
+        m: The module.
+        html: The lesson as HTML.
+        toc: The lesson's sections, as (anchor, heading).
+        summary: The lesson's one-line summary.
+
+    Returns:
+        The page body.
+    """
+    here = url(cat, t, s)
+    mods = s["modules"]
+    k = mods.index(m)
+
+    def neighbour(j: int, before: bool) -> str:
+        """A link to the module before or after this one (or back to the series)."""
+        left, right = ("← ", "") if before else ("", " →")
+        if not 0 <= j < len(mods):
+            return f'<a href="{here}">{left}Series {s["number"]}{right}</a>'
+        other = mods[j]
+        target = lessons.folder(s["folder"], other["number"])
+        label = f"Module {other['number']}: {escape(other['title'])}"
+        if target is None:
+            return f'<span class="soon">{label} (to follow)</span>'
+        return f'<a href="{here}{target.name}/">{left}{label}{right}</a>'
+
+    contents = "".join(f'<li><a href="#{a}">{escape(h)}</a></li>' for a, h in toc)
+    tools = "".join(f'<span class="chip">{escape(x)}</span>' for x in m["tools"])
+    return f"""    <section class="wrap hero lesson-hero">
+      <p class="crumbs"><a href="{cat["base"]}">All courses</a> /
+        <a href="{url(cat, t)}">{escape(t["short"])}</a> /
+        <a href="{here}">Series {s["number"]}</a> / Module {m["number"]}</p>
+      <p class="eyebrow">Series {s["number"]} · Module {m["number"]} ·
+        {escape(m.get("part", ""))}</p>
+      <h1>{escape(m["title"])}</h1>
+      <p class="lede">{escape(summary)}</p>
+      <div class="meta">{tools}</div>
+    </section>
+
+    <section class="wrap">
+      <div class="split lesson-split">
+        <article class="lesson">
+{html}
+        </article>
+        <aside class="aside toc">
+          <h3>In this lesson</h3>
+          <ul class="contents">{contents}</ul>
+          <h3>Practise</h3>
+          <ul><li>Homework: <code>homework.md</code> in the module's folder</li>
+            <li>Ask in the Discord community</li></ul>
+          <a class="btn primary" href="{WAITLIST}">Join the waitlist</a>
+        </aside>
+      </div>
+      <nav class="next" aria-label="Other modules">
+        {neighbour(k - 1, True)}{neighbour(k + 1, False)}</nav>
     </section>
 """
 
@@ -527,7 +602,7 @@ def build(out: Path = DIST) -> list[Path]:
     if root.exists():
         shutil.rmtree(root)
     shutil.copytree(STATIC, root / "assets")
-    css = (root / "assets/css/learn.css").read_bytes()
+    css = (root / "assets/css/learn.css").read_bytes() + lessons.code_css().encode()
     stamp = hashlib.sha256(css).hexdigest()[:10]
     base = cat["base"]
     pages = {
@@ -559,12 +634,32 @@ def build(out: Path = DIST) -> list[Path]:
                 course(cat, i, k),
                 url(cat, t, s),
             )
+    (root / "assets/css/code.css").write_text(lessons.code_css(), encoding="utf-8")
+    for t in cat["tracks"]:
+        for s in t["series"]:
+            for m in s["modules"]:
+                src = lessons.folder(s["folder"], m["number"])
+                if src is None:
+                    continue
+                meta, html, toc = lessons.render((src / "lesson.md").read_text(encoding="utf-8"))
+                dest = root / t["slug"] / s["slug"] / src.name
+                if (src / "figures").is_dir():
+                    shutil.copytree(src / "figures", dest / "figures")
+                pages[dest / "index.html"] = frame(
+                    cat,
+                    f"{url(cat, t, s)}{src.name}/",
+                    f"{m['title']} · Series {s['number']} · Learn · Monstrous Data",
+                    meta.get("summary", m["what"]),
+                    lesson_page(cat, t, s, m, html, toc, meta.get("summary", m["what"])),
+                    f"{url(cat, t, s)}{src.name}/",
+                )
     for path, text in readmes(cat).items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8", newline="\n")
     for path, html in pages.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         html = html.replace("assets/css/learn.css", f"assets/css/learn.css?v={stamp}")
+        html = html.replace("assets/css/code.css", f"assets/css/code.css?v={stamp}")
         path.write_text(html, encoding="utf-8", newline="\n")
     return list(pages)
 

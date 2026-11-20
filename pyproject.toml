@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "David Obeh Alobo", email = "david.alobo@monstrous.com.ng" }]
-dependencies = []
+dependencies = ["markdown>=3.7", "pygments>=2.18"]
 
 [dependency-groups]
 dev = ["pytest>=8", "ruff>=0.6"]

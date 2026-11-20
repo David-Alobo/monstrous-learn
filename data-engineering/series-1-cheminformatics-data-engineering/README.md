@@ -24,9 +24,9 @@ Fourteen modules on the engineering that sits between raw chemical files and mac
 
 ### Reliability
 
-9. **Pipelines that survive failure.** Idempotent steps, checkpoints and cached results, resuming from the last good batch, retries with back-off, atomic writes, and quarantining bad molecules instead of crashing. (Python, joblib.Memory, PostgreSQL)
-10. **Incremental ingestion from ChEMBL and PubChem.** Fetch only what changed, page through APIs within their rate limits, cache responses, and run backfills safely. (ChEMBL and PubChem APIs, Parquet)
-11. **Validating data: contracts and quality checks.** Check every batch against a written contract: column types, required fields, value ranges, units (nM, µM, pIC50), duplicates, links between tables, and counts that agree across sources; stop or quarantine a batch that fails, and report why. (Pandera, RDKit, PostgreSQL)
+9. **Pipelines that survive failure.** Idempotent steps, checkpoints and cached results, resuming from the last good batch, retries with back-off, atomic writes, quarantining bad molecules instead of crashing, and settings checked before a run starts. (Python, joblib.Memory, Pydantic settings, PostgreSQL)
+10. **Incremental ingestion from ChEMBL and PubChem.** Fetch only what changed, page through APIs within their rate limits, cache responses, check every response against a model so a changed API fails loudly, and run backfills safely. (ChEMBL and PubChem APIs, Pydantic, Parquet)
+11. **Validating data: records with Pydantic, tables with Pandera.** Check single records at the edges with Pydantic and whole batches in bulk with Pandera: column types, required fields, value ranges, units (nM, µM, pIC50), duplicates, links between tables, and counts that agree across sources; measure why a million rows are not checked one at a time; stop or quarantine a batch that fails, and report why. (Pydantic, Pandera, RDKit, PostgreSQL)
 12. **Versioning everything.** Version code, environments, database schemas, standardisation rules, datasets and results, so any number can be traced back and rebuilt exactly. (Git, uv, Docker, SQL migrations, DVC)
 13. **Monitoring pipelines.** Structured logs, run history, counts in and out that must reconcile, throughput and error rates, freshness, drift in molecular properties, and alerts when something goes wrong. (Python logging, PostgreSQL, alerts)
 

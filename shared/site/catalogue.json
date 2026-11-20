@@ -35,7 +35,7 @@
             "NetworkX and Neo4j",
             "Parquet",
             "joblib and Dask",
-            "Pandera",
+            "Pydantic and Pandera",
             "Git, uv and Docker",
             "DVC"
           ],
@@ -127,10 +127,11 @@
               "number": 9,
               "part": "Reliability",
               "title": "Pipelines that survive failure",
-              "what": "Idempotent steps, checkpoints and cached results, resuming from the last good batch, retries with back-off, atomic writes, and quarantining bad molecules instead of crashing.",
+              "what": "Idempotent steps, checkpoints and cached results, resuming from the last good batch, retries with back-off, atomic writes, quarantining bad molecules instead of crashing, and settings checked before a run starts.",
               "tools": [
                 "Python",
                 "joblib.Memory",
+                "Pydantic settings",
                 "PostgreSQL"
               ]
             },
@@ -138,18 +139,20 @@
               "number": 10,
               "part": "Reliability",
               "title": "Incremental ingestion from ChEMBL and PubChem",
-              "what": "Fetch only what changed, page through APIs within their rate limits, cache responses, and run backfills safely.",
+              "what": "Fetch only what changed, page through APIs within their rate limits, cache responses, check every response against a model so a changed API fails loudly, and run backfills safely.",
               "tools": [
                 "ChEMBL and PubChem APIs",
+                "Pydantic",
                 "Parquet"
               ]
             },
             {
               "number": 11,
               "part": "Reliability",
-              "title": "Validating data: contracts and quality checks",
-              "what": "Check every batch against a written contract: column types, required fields, value ranges, units (nM, µM, pIC50), duplicates, links between tables, and counts that agree across sources; stop or quarantine a batch that fails, and report why.",
+              "title": "Validating data: records with Pydantic, tables with Pandera",
+              "what": "Check single records at the edges with Pydantic and whole batches in bulk with Pandera: column types, required fields, value ranges, units (nM, µM, pIC50), duplicates, links between tables, and counts that agree across sources; measure why a million rows are not checked one at a time; stop or quarantine a batch that fails, and report why.",
               "tools": [
+                "Pydantic",
                 "Pandera",
                 "RDKit",
                 "PostgreSQL"
