@@ -14,6 +14,8 @@ dev = ["pytest>=8", "ruff>=0.6"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# lessons (Markdown) and the files made from them are laid out for reading, not by the formatter
+extend-exclude = ["*.md", "**/code.py", "**/notebook.ipynb"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

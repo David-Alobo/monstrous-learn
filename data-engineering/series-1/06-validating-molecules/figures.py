@@ -105,16 +105,51 @@ def validation_gate(ns: dict) -> str:
         f"</defs>",
         f'<rect width="{w}" height="{h}" fill="#ffffff"/>',
         box(30, 30, 220, 60, ["Incoming records", f"{total:,} SMILES"], pale["in"], MUTED),
-        box(30, 150, 220, 80, ["1. Read and sanitise", "MolFromSmiles(sanitize=False)",
-                               "DetectChemistryProblems"], pale["gate"], VIOLET),  # fmt: skip
-        box(30, 300, 220, 120, ["2. Check the molecule", "elements (allow-list)",
-                                "fragments, net charge", "stereo (warn), size"],
-            pale["gate"], VIOLET),  # fmt: skip
-        box(560, 150, 270, 100, ["Quarantine", f"{verdicts.get('quarantine', 0):,} records",
-                                 "every issue: code, message, action"],
-            pale["bad"], VIOLET),  # fmt: skip
-        box(560, 330, 270, 80, ["Accept", f"{verdicts.get('accept', 0):,} records",
-                                "warnings stored with the record"], pale["ok"], CYAN),  # fmt: skip
+        box(
+            30,
+            150,
+            220,
+            80,
+            ["1. Read and sanitise", "MolFromSmiles(sanitize=False)", "DetectChemistryProblems"],
+            pale["gate"],
+            VIOLET,
+        ),  # fmt: skip
+        box(
+            30,
+            300,
+            220,
+            120,
+            [
+                "2. Check the molecule",
+                "elements (allow-list)",
+                "fragments, net charge",
+                "stereo (warn), size",
+            ],
+            pale["gate"],
+            VIOLET,
+        ),  # fmt: skip
+        box(
+            560,
+            150,
+            270,
+            100,
+            [
+                "Quarantine",
+                f"{verdicts.get('quarantine', 0):,} records",
+                "every issue: code, message, action",
+            ],
+            pale["bad"],
+            VIOLET,
+        ),  # fmt: skip
+        box(
+            560,
+            330,
+            270,
+            80,
+            ["Accept", f"{verdicts.get('accept', 0):,} records", "warnings stored with the record"],
+            pale["ok"],
+            CYAN,
+        ),  # fmt: skip
         box(560, 30, 125, 70, ["Reject", f"{rejected} records"], "#ffffff", VIOLET),
         box(705, 30, 125, 70, ["Fix: Module 7", f"{fixable} records"], "#ffffff", CYAN),
         arrow(140, 90, 140, 148),
