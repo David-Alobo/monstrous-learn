@@ -19,7 +19,7 @@
         "PostgreSQL + RDKit cartridge",
         "DuckDB",
         "Parquet",
-        "Dask",
+        "joblib and Dask",
         "Pandera",
         "Git, uv and Docker",
         "DVC"
@@ -90,9 +90,9 @@
           "number": 7,
           "part": "Scale",
           "title": "Parallel and distributed processing",
-          "what": "Spread standardisation and fingerprints across cores and machines: chunk sizes, passing SMILES instead of molecule objects, when parallel work stops helping, and a scaling curve.",
+          "what": "Spread standardisation and fingerprints across cores with joblib, then across memory and machines with Dask: chunk sizes, passing SMILES instead of molecule objects, when parallel work stops helping, and a scaling curve; the same code on Windows, macOS and Linux.",
           "tools": [
-            "multiprocessing",
+            "joblib",
             "Dask"
           ]
         },
@@ -100,9 +100,10 @@
           "number": 8,
           "part": "Reliability",
           "title": "Pipelines that survive failure",
-          "what": "Idempotent steps, checkpoints, resuming from the last good batch, retries with back-off, atomic writes, and quarantining bad molecules instead of crashing.",
+          "what": "Idempotent steps, checkpoints and cached results, resuming from the last good batch, retries with back-off, atomic writes, and quarantining bad molecules instead of crashing.",
           "tools": [
             "Python",
+            "joblib.Memory",
             "PostgreSQL"
           ]
         },
