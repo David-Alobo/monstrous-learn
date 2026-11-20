@@ -5,11 +5,13 @@ Free, practical courses in data engineering for chemists, from
 [monstrous.com.ng/learn](https://monstrous.com.ng/learn/); this repository holds their code, tests
 and the pages themselves.
 
-| Series | Course | Status |
+| Track | Courses | Status |
 |---|---|---|
-| 1 | [Data Engineering for Cheminformatics](series-1-cheminformatics-data-engineering/): foundations, scale, reliability | Opens January 2027 |
-| 2 | [The Modern Data Stack for Chemistry](series-2-modern-data-stack/) | Planned |
-| 3 | [Data Pipelines for Digital and Autonomous Chemistry](series-3-autonomous-chemistry/) | Planned |
+| [Data Engineering for Chemistry](data-engineering/) | Series 1: Data Engineering for Cheminformatics · Series 2: The Modern Data Stack for Chemistry · Series 3: Data Pipelines for Digital and Autonomous Chemistry | Series 1 opens January 2027 |
+| [MLOps for Chemists](mlops/) | Outline to follow | Coming later |
+| [Agentic AI in Chemistry](agentic-ai/) | Outline to follow | Coming later |
+
+We start with the data, because models and agents are only as good as the data behind them.
 
 ## Any device
 
@@ -27,8 +29,9 @@ your own pace.
 ## How the repository is organised
 
 ```
-series-N-…/        one folder per course: its own environment (pyproject.toml + uv.lock),
-  NN-…/            one folder per module: code, tests, the lesson text and a notebook
+<track>/           one folder per track (data-engineering, mlops, agentic-ai)
+  series-N-…/      one folder per course: its own environment (pyproject.toml + uv.lock)
+    NN-…/          one folder per module: code, tests, the lesson text and a notebook
 shared/
   site/            builds the pages at monstrous.com.ng/learn/ from site/catalogue.json
   docker/          the PostgreSQL + RDKit stack every course uses (from Series 1, Module 1)
@@ -48,8 +51,8 @@ uv run pytest
 uv run python -m shared.site.build --zip   # dist/learn/ and dist/learn.zip
 ```
 
-`dist/learn.zip` is unpacked on the web host as `public_html/learn/`. To add a course, add it to
-`shared/site/catalogue.json` and give it a folder.
+`dist/learn.zip` is unpacked on the web host as `public_html/learn/`. To add a track or a course, add
+it to `shared/site/catalogue.json`; its page, links and README follow.
 
 ## Licences
 

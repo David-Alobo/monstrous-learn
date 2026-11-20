@@ -1,6 +1,6 @@
 # Series 3: Data Pipelines for Digital and Autonomous Chemistry
 
-The data side of automated synthesis: from designed molecules to checked results.
+Track: Data Engineering for Chemistry. The data side of automated synthesis: from designed molecules to checked results.
 
 **Status:** Planned · **Level:** After Series 1 and 2
 
@@ -19,4 +19,4 @@ What it takes to move data safely between molecular design, robotic synthesis an
 Each module will have its own folder here (`01-…`, `02-…`) with its code, tests, lesson
 and notebook. This file is written from `shared/site/catalogue.json` by
 `python -m shared.site.build`; the course page is
-https://monstrous.com.ng/learn/series-3/.
+https://monstrous.com.ng/learn/data-engineering/series-3/.

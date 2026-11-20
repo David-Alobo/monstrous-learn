@@ -4,11 +4,15 @@ Usage (from the repository root):
     uv run python -m shared.site.build          # writes dist/learn/
     uv run python -m shared.site.build --zip    # and dist/learn.zip (unpack as public_html/learn/)
 
-Every page is made from catalogue.json (the courses and their modules) and templates/frame.html (the
-website's own header and footer, and a bar linking every course), so a new course is one entry in
-the catalogue. The pages are static files, hosted beside WordPress like the 2027 by the Numbers
-articles. The stylesheet's address carries a hash of its contents, so Cloudflare's cache never
-serves an old one after an update.
+The courses are grouped in tracks (Data Engineering for Chemistry first; MLOps for Chemists and
+Agentic AI in Chemistry later), each with its series. Every page is made from catalogue.json and
+templates/frame.html (the website's own header and footer, and a bar linking every track and
+course), so a new track or
+course is one entry in the catalogue. Pages: /learn/ (all tracks), /learn/<track>/ and
+/learn/<track>/<series>/. The pages are static files, hosted beside WordPress like the 2027 by the
+Numbers articles. The stylesheet's address carries a hash of its contents, so Cloudflare's cache
+never serves an old one after an update. The builder also writes each track's and series' README
+from the catalogue, so the two never disagree.
 """
 
 from __future__ import annotations
@@ -36,11 +40,24 @@ ICONS = {
     "task": '<path d="M9 5h10M9 12h10M9 19h10M4 5l1 1 2-2M4 12l1 1 2-2M4 19l1 1 2-2"/>',
     "chat": '<path d="M4 5h16v11H9l-5 4zM8 9h8M8 12h5"/>',
     "award": '<path d="M12 3a6 6 0 100 12 6 6 0 000-12zM8.5 14L7 21l5-3 5 3-1.5-7"/>',
+    "data": (
+        '<path d="M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8'
+        ' 3-8-1.3-8-3zM4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>'
+    ),
+    "model": (
+        '<path d="M5 6a2 2 0 104 0 2 2 0 00-4 0M15 6a2 2 0 104 0 2 2'
+        ' 0 00-4 0M10 18a2 2 0 104 0 2 2 0 00-4 0M8 7.5l3 8.6M16 7.5l-3 8.6M9 6h6"/>'
+    ),
+    "agent": (
+        '<path d="M12 2v3M8 5h8a3 3 0 013 3v7a3 3 0 01-3 3H8a3 3 0'
+        ' 01-3-3V8a3 3 0 013-3zM9 11h.01M15 11h.01M9 15h6M2 11h3M19 11h3"/>'
+    ),
 }
+TRACK_ICON = {"data-engineering": "data", "mlops": "model", "agentic-ai": "agent"}
 
 
 def load(path: Path = CATALOGUE) -> dict:
-    """The catalogue of courses.
+    """The catalogue of tracks and courses.
 
     Args:
         path: The catalogue file.
@@ -49,6 +66,21 @@ def load(path: Path = CATALOGUE) -> dict:
         The parsed catalogue.
     """
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def url(cat: dict, track: dict, series: dict | None = None) -> str:
+    """The address of a track's page, or of one of its series.
+
+    Args:
+        cat: The catalogue.
+        track: The track.
+        series: One of its series, or None for the track itself.
+
+    Returns:
+        The address, e.g. "/learn/data-engineering/series-1/".
+    """
+    tail = f"{series['slug']}/" if series else ""
+    return f"{cat['base']}{track['slug']}/{tail}"
 
 
 def icon(name: str) -> str:
@@ -63,18 +95,18 @@ def icon(name: str) -> str:
     return f'<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">{ICONS[name]}</svg>'
 
 
-def status_chip(series: dict) -> str:
-    """The status of a course as a chip: when it opens, or "Planned".
+def status_chip(item: dict) -> str:
+    """The status of a track or course as a chip: when it opens, "Planned" or "Coming later".
 
     Args:
-        series: One course from the catalogue.
+        item: A track or a course from the catalogue.
 
     Returns:
         The chip markup.
     """
-    if series["status"] == "Planned":
-        return '<span class="chip planned">Planned</span>'
-    return f'<span class="chip status">Starts {escape(series["status"])}</span>'
+    if item["status"] in ("Planned", "Coming later"):
+        return f'<span class="chip planned">{escape(item["status"])}</span>'
+    return f'<span class="chip status">Starts {escape(item["status"])}</span>'
 
 
 def frame(cat: dict, path: str, title: str, description: str, body: str, current: str) -> str:
@@ -82,52 +114,56 @@ def frame(cat: dict, path: str, title: str, description: str, body: str, current
 
     Args:
         cat: The catalogue.
-        path: The page's address on the site, e.g. "/learn/series-1/".
+        path: The page's address on the site, e.g. "/learn/data-engineering/series-1/".
         title: The page title.
         description: The page description (search results and link previews).
         body: The page's main content.
-        current: The slug of the course shown, or "" for the introductory page.
+        current: The address of the page shown, to mark it in the bar.
 
     Returns:
         The whole page.
     """
     base = cat["base"]
-    on = ' class="on"'
-    links = "\n".join(
-        f'      <a{on if s["slug"] == current else ""} href="{base}{s["slug"]}/">'
-        f'<span class="n">{s["number"]}</span>{escape(s["title"])}</a>'
-        for s in cat["series"]
-    )
-    foot = "\n".join(
-        f'        <a href="{base}{s["slug"]}/">Series {s["number"]}: {escape(s["title"])}</a>'
-        for s in cat["series"]
-    )
+
+    def link(href: str, label: str, cls: str = "", hint: str = "") -> str:
+        on = " on" if href == current else ""
+        tip = f' title="{hint}"' if hint else ""
+        return f'      <a class="{cls}{on}" href="{href}"{tip}>{label}</a>'
+
+    links, foot = [], []
+    for t in cat["tracks"]:
+        links.append(link(url(cat, t), escape(t["short"]), "track"))
+        foot.append(f'        <a href="{url(cat, t)}">{escape(t["title"])}</a>')
+        for s in t["series"]:
+            # short labels keep every track in view; the full title shows on hover
+            links.append(link(url(cat, t, s), f"Series {s['number']}", hint=escape(s["title"])))
     page = FRAME.read_text(encoding="utf-8")
     for key, value in {
         "title": escape(title),
         "description": escape(description),
         "base": base,
         "path": path,
-        "home_on": "" if current else "on",
-        "course_links": links,
-        "footer_links": foot,
+        "home_on": "on" if current == base else "",
+        "course_links": "\n".join(links),
+        "footer_links": "\n".join(foot),
         "body": body,
     }.items():
         page = page.replace("{{" + key + "}}", value)
     return page
 
 
-def course_card(cat: dict, s: dict) -> str:
-    """One course as a card on the introductory page.
+def course_card(cat: dict, t: dict, s: dict) -> str:
+    """One course as a card.
 
     Args:
         cat: The catalogue.
+        t: The course's track.
         s: The course.
 
     Returns:
         The card markup.
     """
-    return f"""      <a class="card course" href="{cat["base"]}{s["slug"]}/">
+    return f"""      <a class="card course" href="{url(cat, t, s)}">
         <div class="row"><span class="num">{s["number"]}</span>{status_chip(s)}</div>
         <h3>{escape(s["title"])}</h3>
         <p>{escape(s["tagline"])}</p>
@@ -136,34 +172,38 @@ def course_card(cat: dict, s: dict) -> str:
       </a>"""
 
 
-def intro(cat: dict) -> str:
-    """The introductory page: what the courses are, how they work, and every course.
+def track_card(cat: dict, t: dict) -> str:
+    """One track as a card on the home page.
+
+    Args:
+        cat: The catalogue.
+        t: The track.
+
+    Returns:
+        The card markup.
+    """
+    count = f"{len(t['series'])} series" if t["series"] else "Outline to follow"
+    return f"""      <a class="card course track-card" href="{url(cat, t)}">
+        <div class="row">{icon(TRACK_ICON.get(t["slug"], "read"))}{status_chip(t)}</div>
+        <h3>{escape(t["title"])}</h3>
+        <p>{escape(t["tagline"])}</p>
+        <p class="small">{count}</p>
+        <span class="go">View the track →</span>
+      </a>"""
+
+
+def how_and_cohort(cat: dict) -> str:
+    """The sections every track shares: how the lessons work, and how a cohort runs.
 
     Args:
         cat: The catalogue.
 
     Returns:
-        The page body.
+        The two sections' markup.
     """
-    first = cat["series"][0]
     cohort = cat["cohort"]
-    cards = "\n".join(course_card(cat, s) for s in cat["series"])
-    return f"""    <section class="wrap hero">
-      <p class="eyebrow">Monstrous Data · Learn</p>
-      <h1>Data engineering for chemists</h1>
-      <p class="lede">Free, practical courses for chemists who know some Python. Move from
-        spreadsheets and SDF files to databases, pipelines and checked data, with code you can run
-        and every example tested before it is published.</p>
-      <div class="meta"><span class="chip">Free</span><span class="chip">Code you can run</span>
-        <span class="chip status">First course: {escape(cat["opens"])}</span></div>
-      <div class="actions">
-        <a class="btn primary" href="{cat["base"]}{first["slug"]}/">
-          Start with Series {first["number"]}</a>
-        <a class="btn ghost" href="{WAITLIST}">Join the waitlist</a>
-      </div>
-    </section>
-
-    <section class="wrap" id="how">
+    unit = cohort["cadence"].removesuffix("ly")
+    return f"""    <section class="wrap" id="how">
       <p class="eyebrow">How it works</p>
       <h2>Read, run, check</h2>
       <div class="grid">
@@ -177,25 +217,14 @@ def intro(cat: dict) -> str:
       </div>
     </section>
 
-    <section class="wrap" id="courses">
-      <p class="eyebrow">Courses</p>
-      <h2>Choose a course</h2>
-      <p>Start with Series 1; the later series build on it.</p>
-      <div class="grid">
-{cards}
-      </div>
-    </section>
-
     <section class="wrap" id="cohort">
       <p class="eyebrow">Learn together</p>
       <h2>How the cohort works</h2>
       <p>Each course runs once as a group, starting on a set date, and then stays open to follow
         at your own pace.</p>
       <div class="grid four">
-        <div class="card">{icon("calendar")}
-          <h3>One module a {cohort["cadence"].removesuffix("ly")}</h3>
-          <p>From the start in {escape(cohort["start"])}, a new module every
-          {cohort["cadence"].removesuffix("ly")}, so the group moves together.</p></div>
+        <div class="card">{icon("calendar")}<h3>One module a {unit}</h3>
+          <p>From the start, a new module every {unit}, so the group moves together.</p></div>
         <div class="card">{icon("task")}<h3>Homework</h3><p>A few questions per module, answered by
           running the code. The answers are published after each deadline.</p></div>
         <div class="card">{icon("chat")}<h3>{escape(cohort["community"])} community</h3><p>Ask
@@ -207,7 +236,56 @@ def intro(cat: dict) -> str:
       <p class="note">Joining later? Every module stays open. Take the capstone with the next
         cohort to earn the certificate.</p>
     </section>
+"""
 
+
+def home(cat: dict) -> str:
+    """The home page of all the courses: the tracks, the first courses, and how it all works.
+
+    Args:
+        cat: The catalogue.
+
+    Returns:
+        The page body.
+    """
+    first_track = cat["tracks"][0]
+    first = first_track["series"][0]
+    tracks = "\n".join(track_card(cat, t) for t in cat["tracks"])
+    cards = "\n".join(course_card(cat, first_track, s) for s in first_track["series"])
+    return f"""    <section class="wrap hero">
+      <p class="eyebrow">Monstrous Data · Learn</p>
+      <h1>{escape(cat["title"])}</h1>
+      <p class="lede">Free, practical courses in data engineering and AI for chemists who know
+        some Python, with code you can run and every example tested before it is published.
+        We start with the data: databases, pipelines and checks you can trust. MLOps and
+        agentic AI follow, each built on the one before.</p>
+      <div class="meta"><span class="chip">Free</span><span class="chip">Any device</span>
+        <span class="chip status">First course: {escape(cat["opens"])}</span></div>
+      <div class="actions">
+        <a class="btn primary" href="{url(cat, first_track, first)}">
+          Start with {escape(first_track["short"])}, Series {first["number"]}</a>
+        <a class="btn ghost" href="{WAITLIST}">Join the waitlist</a>
+      </div>
+    </section>
+
+    <section class="wrap" id="tracks">
+      <p class="eyebrow">Tracks</p>
+      <h2>Choose a track</h2>
+      <div class="grid">
+{tracks}
+      </div>
+    </section>
+
+    <section class="wrap" id="courses">
+      <p class="eyebrow">{escape(first_track["title"])}</p>
+      <h2>Start here</h2>
+      <p>Series 1 comes first; the later series build on it.</p>
+      <div class="grid">
+{cards}
+      </div>
+    </section>
+
+{how_and_cohort(cat)}
     <section class="wrap" id="who">
       <p class="eyebrow">Who it is for</p>
       <h2>Chemists who work with data</h2>
@@ -226,17 +304,61 @@ def intro(cat: dict) -> str:
 """
 
 
-def course(cat: dict, k: int) -> str:
-    """A course's page: what it covers, its modules, how to follow it, and the other courses.
+def track_page(cat: dict, i: int) -> str:
+    """A track's page: what it covers and its series, or a note that it is coming.
 
     Args:
         cat: The catalogue.
-        k: The course's position in the catalogue.
+        i: The track's position in the catalogue.
 
     Returns:
         The page body.
     """
-    s = cat["series"][k]
+    t = cat["tracks"][i]
+    if t["series"]:
+        inner = f"""      <h2>Courses</h2>
+      <div class="grid">
+{chr(10).join(course_card(cat, t, s) for s in t["series"])}
+      </div>"""
+    else:
+        inner = """      <div class="card soon"><h3>The outline is on its way</h3>
+        <p>Join the waitlist to hear first when this track opens, and to help shape it: tell us
+        what you would most
+        like this track to cover.</p></div>"""
+    others = "".join(
+        f'<a href="{url(cat, o)}">{escape(o["title"])} →</a>' for o in cat["tracks"] if o is not t
+    )
+    return f"""    <section class="wrap hero">
+      <p class="crumbs"><a href="{cat["base"]}">All courses</a> / {escape(t["short"])}</p>
+      <p class="eyebrow">Track</p>
+      <h1>{escape(t["title"])}</h1>
+      <p class="lede">{escape(t["tagline"])}</p>
+      <div class="meta">{status_chip(t)}<span class="chip">Free</span></div>
+      <div class="actions"><a class="btn ghost" href="{WAITLIST}">Join the waitlist</a></div>
+    </section>
+
+    <section class="wrap">
+      <p>{escape(t["summary"])}</p>
+{inner}
+      <nav class="next" aria-label="Other tracks">
+        <a href="{cat["base"]}">← All courses</a>{others}</nav>
+    </section>
+"""
+
+
+def course(cat: dict, i: int, k: int) -> str:
+    """A course's page: what it covers, its modules, how to follow it, and the other courses.
+
+    Args:
+        cat: The catalogue.
+        i: The track's position in the catalogue.
+        k: The course's position in its track.
+
+    Returns:
+        The page body.
+    """
+    t = cat["tracks"][i]
+    s = t["series"][k]
     planned = s["status"] == "Planned"
     mods = []
     part = None
@@ -246,23 +368,23 @@ def course(cat: dict, k: int) -> str:
             part = m["part"]
             mods.append(f'        <li class="part">{escape(part)}</li>')
         when = "Planned" if planned else (s["status"] if m["number"] == 1 else "To follow")
-        tools = "".join(f'<span class="chip">{escape(t)}</span>' for t in m["tools"])
+        tools = "".join(f'<span class="chip">{escape(x)}</span>' for x in m["tools"])
         mods.append(f"""        <li class="module">
           <span class="mn">{m["number"]}</span>
           <div><h3>{escape(m["title"])}</h3><p>{escape(m["what"])}</p>
             <div class="tools">{tools}</div></div>
           <span class="when">{escape(when)}</span>
         </li>""")
-    tools = "".join(f"<li>{escape(t)}</li>" for t in s["tools"])
-    others = cat["series"]
+    tools = "".join(f"<li>{escape(x)}</li>" for x in s["tools"])
+    others = t["series"]
     prev = (
-        f'<a href="{cat["base"]}{others[k - 1]["slug"]}/">← Series {others[k - 1]["number"]}: '
+        f'<a href="{url(cat, t, others[k - 1])}">← Series {others[k - 1]["number"]}: '
         f"{escape(others[k - 1]['title'])}</a>"
         if k > 0
-        else f'<a href="{cat["base"]}">← All courses</a>'
+        else f'<a href="{url(cat, t)}">← {escape(t["title"])}</a>'
     )
     nxt = (
-        f'<a href="{cat["base"]}{others[k + 1]["slug"]}/">Series {others[k + 1]["number"]}: '
+        f'<a href="{url(cat, t, others[k + 1])}">Series {others[k + 1]["number"]}: '
         f"{escape(others[k + 1]['title'])} →</a>"
         if k + 1 < len(others)
         else f'<a href="{cat["base"]}">All courses →</a>'
@@ -274,8 +396,9 @@ def course(cat: dict, k: int) -> str:
         "follow at your own pace."
     )
     return f"""    <section class="wrap hero">
-      <p class="crumbs"><a href="{cat["base"]}">All courses</a> / Series {s["number"]}</p>
-      <p class="eyebrow">Series {s["number"]}</p>
+      <p class="crumbs"><a href="{cat["base"]}">All courses</a> /
+        <a href="{url(cat, t)}">{escape(t["short"])}</a> / Series {s["number"]}</p>
+      <p class="eyebrow">{escape(t["title"])} · Series {s["number"]}</p>
       <h1>{escape(s["title"])}</h1>
       <p class="lede">{escape(s["tagline"])}</p>
       <div class="meta">{status_chip(s)}<span class="chip">{len(s["modules"])} modules</span>
@@ -310,10 +433,12 @@ def course(cat: dict, k: int) -> str:
 """
 
 
-def readme(s: dict) -> str:
+def readme(cat: dict, t: dict, s: dict) -> str:
     """A course folder's README, written from the catalogue so the two never disagree.
 
     Args:
+        cat: The catalogue.
+        t: The course's track.
         s: The course.
 
     Returns:
@@ -323,7 +448,7 @@ def readme(s: dict) -> str:
     lines = [
         f"# Series {s['number']}: {s['title']}",
         "",
-        s["tagline"],
+        f"Track: {t['title']}. {s['tagline']}",
         "",
         f"**Status:** {status} · **Level:** {s['level']}",
         "",
@@ -345,13 +470,55 @@ def readme(s: dict) -> str:
         "Each module will have its own folder here (`01-…`, `02-…`) with its code, tests, lesson",
         "and notebook. This file is written from `shared/site/catalogue.json` by",
         "`python -m shared.site.build`; the course page is",
-        f"https://monstrous.com.ng/learn/{s['slug']}/.",
+        f"https://monstrous.com.ng{url(cat, t, s)}.",
     ]
     return "\n".join(lines) + "\n"
 
 
+def track_readme(cat: dict, t: dict) -> str:
+    """A track folder's README, written from the catalogue.
+
+    Args:
+        cat: The catalogue.
+        t: The track.
+
+    Returns:
+        The README text.
+    """
+    lines = [f"# {t['title']}", "", t["tagline"], "", f"**Status:** {t['status']}", "",
+             t["summary"]]  # fmt: skip
+    if t["series"]:
+        lines += ["", "## Series", ""]
+        for s in t["series"]:
+            folder = Path(s["folder"]).name
+            lines.append(f"{s['number']}. [{s['title']}]({folder}/): {s['tagline']}")
+    lines += [
+        "",
+        "This file is written from `shared/site/catalogue.json` by `python -m shared.site.build`;",
+        f"the track's page is https://monstrous.com.ng{url(cat, t)}.",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def readmes(cat: dict) -> dict[Path, str]:
+    """Every README the catalogue defines: one per track and one per course.
+
+    Args:
+        cat: The catalogue.
+
+    Returns:
+        Each README's path and text.
+    """
+    out = {}
+    for t in cat["tracks"]:
+        out[Path(t["folder"], "README.md")] = track_readme(cat, t)
+        for s in t["series"]:
+            out[Path(s["folder"], "README.md")] = readme(cat, t, s)
+    return out
+
+
 def build(out: Path = DIST) -> list[Path]:
-    """Write every page and the assets under out/learn/.
+    """Write every page and the assets under out/learn/, and the READMEs.
 
     Args:
         out: The output folder.
@@ -366,28 +533,39 @@ def build(out: Path = DIST) -> list[Path]:
     shutil.copytree(STATIC, root / "assets")
     css = (root / "assets/css/learn.css").read_bytes()
     stamp = hashlib.sha256(css).hexdigest()[:10]
+    base = cat["base"]
     pages = {
         root / "index.html": frame(
             cat,
-            cat["base"],
-            "Learn: data engineering for chemists · Monstrous Data",
-            "Free, practical courses for chemists who know some Python: chemical databases, "
-            "pipelines and checked data, with code you can run.",
-            intro(cat),
-            "",
+            base,
+            "Learn with Monstrous Data: data engineering and AI for chemists",
+            "Free, practical courses in data engineering and AI for chemists who know some "
+            "Python, with code you can run on any device.",
+            home(cat),
+            base,
         )
     }
-    for k, s in enumerate(cat["series"]):
-        pages[root / s["slug"] / "index.html"] = frame(
+    for i, t in enumerate(cat["tracks"]):
+        pages[root / t["slug"] / "index.html"] = frame(
             cat,
-            f"{cat['base']}{s['slug']}/",
-            f"Series {s['number']}: {s['title']} · Learn · Monstrous Data",
-            s["tagline"] + " " + s["summary"],
-            course(cat, k),
-            s["slug"],
+            url(cat, t),
+            f"{t['title']} · Learn · Monstrous Data",
+            f"{t['tagline']} {t['summary']}",
+            track_page(cat, i),
+            url(cat, t),
         )
-    for s in cat["series"]:
-        Path(s["folder"], "README.md").write_text(readme(s), encoding="utf-8", newline="\n")
+        for k, s in enumerate(t["series"]):
+            pages[root / t["slug"] / s["slug"] / "index.html"] = frame(
+                cat,
+                url(cat, t, s),
+                f"Series {s['number']}: {s['title']} · Learn · Monstrous Data",
+                f"{s['tagline']} {s['summary']}",
+                course(cat, i, k),
+                url(cat, t, s),
+            )
+    for path, text in readmes(cat).items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8", newline="\n")
     for path, html in pages.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         html = html.replace("assets/css/learn.css", f"assets/css/learn.css?v={stamp}")

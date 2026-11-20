@@ -1,6 +1,6 @@
 # Series 2: The Modern Data Stack for Chemistry
 
-Production tools for lab data: ingestion, warehousing, transformation and scheduling.
+Track: Data Engineering for Chemistry. Production tools for lab data: ingestion, warehousing, transformation and scheduling.
 
 **Status:** Planned · **Level:** After Series 1
 
@@ -18,4 +18,4 @@ The tools data teams use in industry, applied to chemistry: declarative ingestio
 Each module will have its own folder here (`01-…`, `02-…`) with its code, tests, lesson
 and notebook. This file is written from `shared/site/catalogue.json` by
 `python -m shared.site.build`; the course page is
-https://monstrous.com.ng/learn/series-2/.
+https://monstrous.com.ng/learn/data-engineering/series-2/.
