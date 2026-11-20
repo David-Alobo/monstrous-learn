@@ -14,6 +14,7 @@ dependencies = [
     "neo4j>=5.20",
     "joblib>=1.4",
     "dask[dataframe,distributed]>=2024.8",
+    "psutil>=5.9",
     "pydantic>=2.8",
     "pydantic-settings>=2.4",
     "pandera>=0.20",

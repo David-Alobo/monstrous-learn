@@ -55,7 +55,8 @@ def test_declares_every_package_it_imports(lesson):
                 names = [node.module]
             for name in names:
                 top = name.split(".")[0]
-                if top not in STDLIB and top not in LOCAL:
+                own = {f.stem for f in lesson.parent.glob("*.py")}  # the module's own files
+                if top not in STDLIB and top not in LOCAL and top not in own:
                     assert PIP_NAME.get(top, top) in declared, (
                         f"{top} is imported but not in requires"
                     )
