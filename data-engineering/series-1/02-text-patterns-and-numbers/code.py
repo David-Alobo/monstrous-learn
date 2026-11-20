@@ -3,8 +3,18 @@
 SMILES, InChI, molfiles, conformers, SMARTS, fingerprints and descriptors: what each keeps and loses, and which to store for which job.
 
 Lesson: https://monstrous.com.ng/learn/data-engineering/series-1/02-text-patterns-and-numbers/
-Run from the series folder: uv run python <this folder>/code.py
+Run it from anywhere, e.g. from the series folder: uv run python 02-text-patterns-and-numbers/code.py
 """
+
+import os as _os
+import sys as _sys
+from pathlib import Path as _Path
+
+# run as the lesson does: in this module's folder (for work/ and figures/), with the
+# course's helpers (chemlib, in the series folder) and this module's own importable
+_HERE = _Path(__file__).resolve().parent
+_os.chdir(_HERE)
+_sys.path[:0] = [str(_HERE), str(_HERE.parent)]
 from rdkit import Chem
 
 aspirin = Chem.MolFromSmiles("CC(=O)Oc1ccccc1C(=O)O")

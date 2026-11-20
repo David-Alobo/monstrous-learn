@@ -3,8 +3,18 @@
 A molecule is a graph of atoms and bonds; as matrices it becomes something algorithms and models can compute on.
 
 Lesson: https://monstrous.com.ng/learn/data-engineering/series-1/01-graphs-and-matrices/
-Run from the series folder: uv run python <this folder>/code.py
+Run it from anywhere, e.g. from the series folder: uv run python 01-graphs-and-matrices/code.py
 """
+
+import os as _os
+import sys as _sys
+from pathlib import Path as _Path
+
+# run as the lesson does: in this module's folder (for work/ and figures/), with the
+# course's helpers (chemlib, in the series folder) and this module's own importable
+_HERE = _Path(__file__).resolve().parent
+_os.chdir(_HERE)
+_sys.path[:0] = [str(_HERE), str(_HERE.parent)]
 
 # ---- 1. A molecule is a graph ----
 from rdkit import Chem

@@ -125,7 +125,10 @@ def run(text: str, folder: Path) -> list[tuple[str | None, str | None, str]]:
                 continue
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
-                exec(compile(body, f"{folder.name}/lesson.md block {i + 1}", "exec"), namespace)
+                # dont_inherit: lesson code must not inherit this file's `from __future__`
+                # imports (they would turn type hints into strings, which breaks Pydantic models)
+                name = f"{folder.name}/lesson.md block {i + 1}"
+                exec(compile(body, name, "exec", dont_inherit=True), namespace)
             results.append((out.getvalue(), shown, shown_kind))
     finally:
         os.chdir(here)
@@ -210,6 +213,26 @@ def setup_lines(meta: dict[str, str], folder: str) -> list[str]:
     return lines
 
 
+def helpers(folder: Path, body: str) -> list[tuple[str, str]]:
+    """The repository's own Python files a lesson imports, with where to download each.
+
+    Args:
+        folder: The module's folder.
+        body: The lesson's Markdown.
+
+    Returns:
+        (module name, download address) for each: the series' helpers (e.g. chemlib) and the
+        module's own files (e.g. workers.py), in that order.
+    """
+    imported = set(re.findall(r"^\s*(?:from|import) (\w+)", body, re.M))
+    tools = ("lessonkit", "figurekit")  # the course's own tooling, not lesson code
+    series = [(n, f"{RAW}/{n}.py") for n in sorted(imported)
+              if (folder.parent / f"{n}.py").exists() and n not in tools]  # fmt: skip
+    own = [(n, f"{RAW}/{folder.name}/{n}.py") for n in sorted(imported)
+           if (folder / f"{n}.py").exists() and n not in ("code", "figures")]  # fmt: skip
+    return series + own
+
+
 def export(folder: Path) -> dict[Path, str]:
     """The notebook, the script and the README of a module, made from its lesson.
 
@@ -245,14 +268,15 @@ def export(folder: Path) -> dict[Path, str]:
 
     install = "# Install what this lesson needs (in Colab, or any fresh environment)\n"
     install += f"%pip install -q {' '.join(listed(meta, 'requires'))}"
-    # the course's own helpers come with the repository; outside it (in Colab), fetch them
-    local = sorted(set(re.findall(r"^(?:from|import) (chemlib)\b", body, re.M)))
+    # the course's own helpers (chemlib) and this module's (e.g. workers.py) come with the
+    # repository; outside it (in Colab), fetch them
+    local = helpers(folder, body)
     if local:
         install += "\n\nimport pathlib\nimport urllib.request\n"
-        for name in local:
+        for name, url in local:
             install += (
                 f'if not pathlib.Path("{name}.py").exists():\n'
-                f'    urllib.request.urlretrieve("{RAW}/{name}.py", "{name}.py")\n'
+                f'    urllib.request.urlretrieve("{url}", "{name}.py")\n'
             )
     cells = [
         md_cell(f"# {title}\n\n{summary}\n\nThe lesson's page: {page}"),
@@ -284,8 +308,17 @@ def export(folder: Path) -> dict[Path, str]:
         "nbformat_minor": 5,
     }
 
-    script = [f'"""{title}: the code of the lesson, in order.\n\n{summary}\n\nLesson: {page}\n'
-              'Run from the series folder: uv run python <this folder>/code.py\n"""\n']  # fmt: skip
+    script = [
+        f'"""{title}: the code of the lesson, in order.\n\n{summary}\n\nLesson: {page}\n'
+        f"Run it from anywhere, e.g. from the series folder: uv run python {folder.name}/code.py\n"
+        '"""\n\n'
+        "import os as _os\nimport sys as _sys\nfrom pathlib import Path as _Path\n\n"
+        "# run as the lesson does: in this module's folder (for work/ and figures/), with the\n"
+        "# course's helpers (chemlib, in the series folder) and this module's own importable\n"
+        "_HERE = _Path(__file__).resolve().parent\n"
+        "_os.chdir(_HERE)\n"
+        "_sys.path[:0] = [str(_HERE), str(_HERE.parent)]\n"
+    ]
     section = None
     for kind, code, start, _end in found:
         if kind != "python":

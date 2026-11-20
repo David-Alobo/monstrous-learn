@@ -4,7 +4,8 @@ Real screening libraries (Enamine REAL, for example) are built by combining buil
 scaffolds. This module does the same with a small set of drug-like scaffolds, each with two to four
 positions (R1, R2, …) and a list of common substituents for each. Every combination is a valid
 molecule, numbered from 0, so a library can be made, sampled or streamed without storing it. As in
-real enumerated libraries, a few combinations give the same molecule (about 0.4%, by symmetry).
+real enumerated libraries, a few combinations give the same molecule (about 0.5% of a sample, by
+symmetry).
 
 It also adds the faults real files have, on purpose and on record, so the validation and
 standardisation modules have real problems to find (and a record of the truth to check against).
