@@ -26,7 +26,7 @@ prints**. The tests run every code block and compare. If you change code in a le
 outputs and run the tests:
 
 ```bash
-cd data-engineering/series-1-cheminformatics-data-engineering
+cd data-engineering/series-1
 uv sync
 uv run python lessonkit.py 01-graphs-and-matrices --write   # refresh the outputs
 uv run pytest                                               # every lesson, every output

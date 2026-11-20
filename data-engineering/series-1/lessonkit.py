@@ -40,7 +40,7 @@ NEEDS = re.compile(r"\A# needs: (\w+)")
 SERVICE_ENV = {"postgres": "DATABASE_URL", "neo4j": "NEO4J_URI"}
 REPO = "David-Alobo/monstrous-learn"
 SITE = "https://monstrous.com.ng/learn/data-engineering/series-1"
-SERIES_PATH = "data-engineering/series-1-cheminformatics-data-engineering"
+SERIES_PATH = "data-engineering/series-1"
 RAW = f"https://raw.githubusercontent.com/{REPO}/main/{SERIES_PATH}"
 
 
@@ -190,6 +190,11 @@ def setup_lines(meta: dict[str, str], folder: str) -> list[str]:
         "```",
         "",
         f"or with pip only, in any Python 3.11+ environment: `python -m pip install {pkgs}`.",
+        "",
+        "*On Windows*, clone into a short folder (for example `C:\code`): Windows limits paths to"
+        " 260 characters unless [long paths are enabled]"
+        "(https://learn.microsoft.com/windows/win32/fileio/maximum-file-path-limitation), and"
+        " some packages install deep inside the environment.",
     ]
     services = listed(meta, "services")
     if services:

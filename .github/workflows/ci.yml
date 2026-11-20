@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: data-engineering/series-1-cheminformatics-data-engineering
+        working-directory: data-engineering/series-1
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6

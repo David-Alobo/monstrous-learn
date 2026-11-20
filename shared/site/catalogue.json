@@ -19,7 +19,7 @@
       "series": [
         {
           "slug": "series-1",
-          "folder": "data-engineering/series-1-cheminformatics-data-engineering",
+          "folder": "data-engineering/series-1",
           "number": 1,
           "title": "Data Engineering for Cheminformatics",
           "tagline": "From SDF files to chemical data pipelines that scale to millions of molecules, survive failures and can be trusted.",
@@ -208,7 +208,7 @@
         },
         {
           "slug": "series-2",
-          "folder": "data-engineering/series-2-modern-data-stack",
+          "folder": "data-engineering/series-2",
           "number": 2,
           "title": "The Modern Data Stack for Chemistry",
           "tagline": "Production tools for lab data: ingestion, warehousing, transformation and scheduling.",
@@ -271,7 +271,7 @@
         },
         {
           "slug": "series-3",
-          "folder": "data-engineering/series-3-autonomous-chemistry",
+          "folder": "data-engineering/series-3",
           "number": 3,
           "title": "Data Pipelines for Digital and Autonomous Chemistry",
           "tagline": "The data side of automated synthesis: from designed molecules to checked results.",
