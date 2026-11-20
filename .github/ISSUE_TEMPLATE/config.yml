@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Ask a question in the Discord community
+    url: https://monstrous.com.ng/learn/
+    about: Questions about the material are answered fastest by other learners there.
+  - name: Write to Monstrous Data
+    url: mailto:contact@monstrous.com.ng
+    about: For anything private, or about the courses themselves.

@@ -1,5 +1,7 @@
 # Monstrous Data · Learn
 
+[![tests](https://github.com/David-Alobo/monstrous-learn/actions/workflows/ci.yml/badge.svg)](https://github.com/David-Alobo/monstrous-learn/actions/workflows/ci.yml)
+
 Free, practical courses in data engineering for chemists, from
 [Monstrous Data](https://monstrous.com.ng). The lessons are published at
 [monstrous.com.ng/learn](https://monstrous.com.ng/learn/); this repository holds their code, tests
@@ -43,6 +45,18 @@ Each series has its own environment so that the tools of one (say, dbt and Prefe
 with another's. Every code example in a lesson is run by the tests before it is published.
 Releases are tagged per series (`series1-v1.0`), and each lesson points to its tag.
 
+## Before publishing
+
+The whole history becomes public with the repository, so before any release run:
+
+```bash
+uv run python tools/prepublish.py
+```
+
+It scans every version of every file for credentials, private details, homework answers, data files
+and large files. Homework answers and cohort records are never kept here: they live in a separate
+private repository.
+
 ## Building the pages
 
 ```bash
@@ -60,5 +74,6 @@ it to `shared/site/catalogue.json`; its page, links and README follow.
 - Lesson text and figures: Creative Commons Attribution 4.0 ([LICENSE-content](LICENSE-content)).
 - Datasets keep their own licences, named in each module.
 
-Questions and corrections: [contact@monstrous.com.ng](mailto:contact@monstrous.com.ng), or open an
+Found an error, or want to help? See [CONTRIBUTING.md](CONTRIBUTING.md); everyone taking part follows
+the [code of conduct](CODE_OF_CONDUCT.md). Questions and corrections: [contact@monstrous.com.ng](mailto:contact@monstrous.com.ng), or open an
 issue.

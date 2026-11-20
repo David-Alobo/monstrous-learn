@@ -1,0 +1,15 @@
+name: Suggestion
+description: A clearer explanation, a better example, or a topic you would like covered.
+labels: ["suggestion"]
+body:
+  - type: input
+    id: where
+    attributes:
+      label: Which course or lesson does it concern?
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your suggestion
+      description: What would make the course better, and why.
+    validations:
+      required: true

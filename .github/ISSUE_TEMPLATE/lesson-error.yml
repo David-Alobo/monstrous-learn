@@ -1,0 +1,29 @@
+name: Error in a lesson
+description: Something in a lesson is wrong, broken or confusing.
+labels: ["lesson error"]
+body:
+  - type: input
+    id: where
+    attributes:
+      label: Which lesson and section?
+      description: For example "Series 1, Module 2, section 3", or the page's address.
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What is wrong?
+      description: What the lesson says or does, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: run
+    attributes:
+      label: If code fails, what did you run and what happened?
+      description: Paste the code and the full error message.
+      render: text
+  - type: input
+    id: where-run
+    attributes:
+      label: Where did you run it?
+      description: For example "in the browser", "Windows 11, Python 3.12", "macOS".
