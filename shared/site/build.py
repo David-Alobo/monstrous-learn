@@ -6,9 +6,8 @@ Usage (from the repository root):
 
 The courses are grouped in tracks (Data Engineering for Chemistry first; MLOps for Chemists and
 Agentic AI in Chemistry later), each with its series. Every page is made from catalogue.json and
-templates/frame.html (the website's own header and footer, and a bar linking every track and
-course), so a new track or
-course is one entry in the catalogue. Pages: /learn/ (all tracks), /learn/<track>/ and
+templates/frame.html (the website's own header and footer, and a bar linking every track), so a
+new track or course is one entry in the catalogue. Pages: /learn/ (all tracks), /learn/<track>/ and
 /learn/<track>/<series>/. The pages are static files, hosted beside WordPress like the 2027 by the
 Numbers articles. The stylesheet's address carries a hash of its contents, so Cloudflare's cache
 never serves an old one after an update. The builder also writes each track's and series' README
@@ -118,25 +117,22 @@ def frame(cat: dict, path: str, title: str, description: str, body: str, current
         title: The page title.
         description: The page description (search results and link previews).
         body: The page's main content.
-        current: The address of the page shown, to mark it in the bar.
+        current: The address of the page shown, to mark its track in the bar.
 
     Returns:
         The whole page.
     """
     base = cat["base"]
 
-    def link(href: str, label: str, cls: str = "", hint: str = "") -> str:
-        on = " on" if href == current else ""
-        tip = f' title="{hint}"' if hint else ""
-        return f'      <a class="{cls}{on}" href="{href}"{tip}>{label}</a>'
+    def link(href: str, label: str) -> str:
+        # a track stays marked on its own page and on every course page inside it
+        on = ' class="on"' if current.startswith(href) else ""
+        return f'      <a{on} href="{href}">{label}</a>'
 
     links, foot = [], []
     for t in cat["tracks"]:
-        links.append(link(url(cat, t), escape(t["short"]), "track"))
+        links.append(link(url(cat, t), escape(t["title"])))
         foot.append(f'        <a href="{url(cat, t)}">{escape(t["title"])}</a>')
-        for s in t["series"]:
-            # short labels keep every track in view; the full title shows on hover
-            links.append(link(url(cat, t, s), f"Series {s['number']}", hint=escape(s["title"])))
     page = FRAME.read_text(encoding="utf-8")
     for key, value in {
         "title": escape(title),

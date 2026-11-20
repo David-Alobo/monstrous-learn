@@ -52,14 +52,15 @@ def test_every_internal_link_and_asset_exists(site):
             assert target.exists(), f"{page.relative_to(out)} -> {ref}"
 
 
-def test_every_page_links_every_track_and_course(site):
+def test_every_page_links_every_track_and_each_track_its_courses(site):
     out, pages = site
     for page in pages:
         html = page.read_text(encoding="utf-8")
         for t in TRACKS:
             assert f'href="{build.url(CAT, t)}"' in html, (page, t["slug"])
-        for t, s in SERIES:
-            assert f'href="{build.url(CAT, t, s)}"' in html, (page, s["slug"])
+    for t, s in SERIES:
+        html = (out / f"learn/{t['slug']}/index.html").read_text(encoding="utf-8")
+        assert f'href="{build.url(CAT, t, s)}"' in html, (t["slug"], s["slug"])
 
 
 def test_stylesheet_address_is_versioned(site):
