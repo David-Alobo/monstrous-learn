@@ -6,8 +6,22 @@ requires-python = ">=3.11"
 dependencies = [
     "rdkit>=2024.9",
     "networkx>=3.3",
+    "numpy>=1.26",
     "pandas>=2.2",
     "pyarrow>=17",
+    "duckdb>=1.1",
+    "psycopg[binary]>=3.2",
+    "neo4j>=5.20",
+    "joblib>=1.4",
+    "dask[dataframe,distributed]>=2024.8",
+    "pydantic>=2.8",
+    "pydantic-settings>=2.4",
+    "pandera>=0.20",
+    "requests>=2.32",
+    "pooch>=1.8",
+    "tenacity>=9.0",
+    "matplotlib>=3.9",
+    "dvc>=3.50",
 ]
 
 [dependency-groups]
@@ -16,6 +30,8 @@ dev = ["pytest>=8", "ruff>=0.6"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# made from each lesson by lessonkit.py --export, in the lesson's own order
+extend-exclude = ["*/code.py", "*/notebook.ipynb"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

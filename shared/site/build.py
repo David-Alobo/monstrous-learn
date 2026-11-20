@@ -17,6 +17,7 @@ from the catalogue, so the two never disagree.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import shutil
 import sys
@@ -25,6 +26,37 @@ from html import escape
 from pathlib import Path
 
 from . import lessons
+
+
+def setup_html(series_folder: str, meta: dict, folder: str) -> str:
+    """A lesson's "Get set up" box, from its series' own lessonkit (the same text as the notebook
+    and the module README), with download links to the notebook and the code beside the page.
+
+    Args:
+        series_folder: The series' folder, which holds its lessonkit.py.
+        meta: The lesson's front matter.
+        folder: The module's folder name.
+
+    Returns:
+        The box's HTML.
+    """
+    spec = importlib.util.spec_from_file_location("lessonkit", Path(series_folder, "lessonkit.py"))
+    kit = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(kit)
+    lines = kit.setup_lines(meta, folder)[1:]  # without its own heading
+    body = lessons.markdown.markdown(
+        "\n".join(lines),
+        extensions=["fenced_code", "codehilite"],
+        extension_configs={"codehilite": {"css_class": "hl"}},
+    )
+    return (
+        '<section class="setup" id="get-set-up"><h2>Get set up</h2>'
+        f"{body}"
+        '<p class="downloads"><a class="btn ghost" href="notebook.ipynb" download>'
+        "Download the notebook</a>"
+        '<a class="btn ghost" href="code.py" download>Download the code</a></p></section>'
+    )
+
 
 HERE = Path(__file__).parent
 CATALOGUE = HERE / "catalogue.json"
@@ -440,7 +472,9 @@ def course(cat: dict, i: int, k: int) -> str:
 """
 
 
-def lesson_page(cat: dict, t: dict, s: dict, m: dict, html: str, toc: list, summary: str) -> str:
+def lesson_page(
+    cat: dict, t: dict, s: dict, m: dict, html: str, toc: list, summary: str, setup: str = ""
+) -> str:
     """A module's lesson page: the lesson, a contents panel, and the modules either side.
 
     Args:
@@ -451,6 +485,7 @@ def lesson_page(cat: dict, t: dict, s: dict, m: dict, html: str, toc: list, summ
         html: The lesson as HTML.
         toc: The lesson's sections, as (anchor, heading).
         summary: The lesson's one-line summary.
+        setup: The "Get set up" box, shown before the lesson.
 
     Returns:
         The page body.
@@ -471,6 +506,7 @@ def lesson_page(cat: dict, t: dict, s: dict, m: dict, html: str, toc: list, summ
             return f'<span class="soon">{label} (to follow)</span>'
         return f'<a href="{here}{target.name}/">{left}{label}{right}</a>'
 
+    toc = [("get-set-up", "Get set up"), *toc] if setup else toc
     contents = "".join(f'<li><a href="#{a}">{escape(h)}</a></li>' for a, h in toc)
     tools = "".join(f'<span class="chip">{escape(x)}</span>' for x in m["tools"])
     return f"""    <section class="wrap hero lesson-hero">
@@ -487,6 +523,7 @@ def lesson_page(cat: dict, t: dict, s: dict, m: dict, html: str, toc: list, summ
     <section class="wrap">
       <div class="split lesson-split">
         <article class="lesson">
+{setup}
 {html}
         </article>
         <aside class="aside toc">
@@ -645,12 +682,17 @@ def build(out: Path = DIST) -> list[Path]:
                 dest = root / t["slug"] / s["slug"] / src.name
                 if (src / "figures").is_dir():
                     shutil.copytree(src / "figures", dest / "figures")
+                dest.mkdir(parents=True, exist_ok=True)
+                for name in ("notebook.ipynb", "code.py"):
+                    if (src / name).exists():
+                        shutil.copy2(src / name, dest / name)
+                setup = setup_html(s["folder"], meta, src.name)
                 pages[dest / "index.html"] = frame(
                     cat,
                     f"{url(cat, t, s)}{src.name}/",
                     f"{m['title']} · Series {s['number']} · Learn · Monstrous Data",
                     meta.get("summary", m["what"]),
-                    lesson_page(cat, t, s, m, html, toc, meta.get("summary", m["what"])),
+                    lesson_page(cat, t, s, m, html, toc, meta.get("summary", m["what"]), setup),
                     f"{url(cat, t, s)}{src.name}/",
                 )
     for path, text in readmes(cat).items():

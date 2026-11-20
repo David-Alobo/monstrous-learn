@@ -177,3 +177,10 @@ a.course:hover { border-color: var(--violet); transform: translateY(-2px); }
 .lesson .hl .copy:hover { opacity: 1; color: var(--ink); border-color: var(--violet); }
 .lesson .hl .copy.done { color: var(--cyan); border-color: var(--cyan); }
 .lesson .hl .copy:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+/* the "Get set up" box at the top of every lesson */
+.lesson .setup { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 1.1rem 1.3rem; margin: 0 0 2rem; }
+.lesson .setup h2 { margin: 0 0 0.6rem; font-size: 1.3rem; }
+.lesson .setup p { font-size: 0.95rem; }
+.lesson .setup .hl { border-radius: 10px; margin: 0.4rem 0 0.8rem; }
+.lesson .downloads { display: flex; flex-wrap: wrap; gap: 10px; margin: 0.8rem 0 0; }
+.lesson .downloads .btn { font-size: 0.88rem; padding: 0.55rem 1rem; }

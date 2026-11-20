@@ -1,6 +1,7 @@
 ---
 title: Molecules as graphs and matrices
 summary: A molecule is a graph of atoms and bonds; as matrices it becomes something algorithms and models can compute on.
+requires: rdkit, networkx, numpy, pandas
 ---
 
 A chemist looks at a drawing and sees aspirin. A computer sees nothing until the molecule is

@@ -1,6 +1,7 @@
 ---
 title: Molecules as text, patterns and numbers
 summary: SMILES, InChI, molfiles, conformers, SMARTS, fingerprints and descriptors: what each keeps and loses, and which to store for which job.
+requires: rdkit, pandas
 ---
 
 Module 1 treated a molecule as a graph. Most chemical data does not arrive as graphs, though: it

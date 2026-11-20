@@ -16,7 +16,7 @@ import markdown
 from pygments.formatters import HtmlFormatter
 
 STYLE = "github-dark"
-OUTPUT = re.compile(r"```output\n(.*?)```\n", re.S)
+OUTPUT = re.compile(r"```(output varies|output)\n(.*?)```\n", re.S)
 FIGURE = re.compile(r'<p><img alt="([^"]*)" src="([^"]+)" ?/?></p>')
 
 
@@ -60,13 +60,16 @@ def render(text: str) -> tuple[dict[str, str], str, list[tuple[str, str]]]:
         The front matter, the HTML body, and the (anchor, heading) of each section.
     """
     meta, body = front_matter(text)
-    # outputs become plain blocks under a label, before Markdown sees them
-    body = OUTPUT.sub(
-        lambda m: (
-            f'\n<div class="output"><span>Output</span><pre>{escape(m.group(1))}</pre></div>\n\n'
-        ),
-        body,
-    )
+
+    # outputs become plain blocks under a label, before Markdown sees them; an output that changes
+    # from run to run (timings, memory) is labelled as an example
+    def output(m: re.Match) -> str:
+        label = "Example output: yours will differ" if m.group(1) == "output varies" else "Output"
+        return (
+            f'\n<div class="output"><span>{label}</span><pre>{escape(m.group(2))}</pre></div>\n\n'
+        )
+
+    body = OUTPUT.sub(output, body)
     md = markdown.Markdown(
         extensions=["fenced_code", "codehilite", "tables", "toc", "sane_lists"],
         extension_configs={"codehilite": {"css_class": "hl", "guess_lang": False}},
