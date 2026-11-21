@@ -4,25 +4,41 @@ summary: SMILES, InChI, molfiles, conformers, SMARTS, fingerprints and descripto
 requires: rdkit, pandas
 ---
 
-Module 1 treated a molecule as a graph. Most chemical data does not arrive as graphs, though: it
-arrives as text (SMILES strings, InChIs, SDF files), is searched with patterns, and is compared and
-modelled as numbers. Each of these representations keeps some things and loses others, and a data
-engineer has to know which, before choosing what to store.
+[Module 1](../01-graphs-and-matrices/) treated a molecule as a graph. Most chemical data does not
+arrive as graphs, though. It arrives as text: SMILES strings, InChIs, SDF files. It is searched with
+patterns, and it is compared and modelled as numbers. Each of these ways of writing a molecule down
+(we call them **representations**) keeps some things and loses others. Before we choose what to
+store, we have to know which.
 
 By the end of this module you will be able to:
 
-- explain why one molecule has many SMILES but one canonical SMILES;
-- tell what a representation keeps and what it loses (stereochemistry, aromaticity, tautomers);
-- use InChIKey as a molecule's identity, and SMARTS as a search pattern;
-- turn molecules into fingerprints and descriptors for comparison and machine learning;
-- choose what to store, for which job.
+- explain why one molecule can be written as many different SMILES strings, and how RDKit picks one
+  standard string for it (the **canonical** SMILES);
+- tell what each representation keeps and what it loses, such as stereochemistry (which mirror image
+  a molecule is), aromaticity and tautomers (forms that differ only in where a hydrogen sits);
+- use an **InChIKey**, a short code calculated from the structure, as a molecule's identity, and a
+  **SMARTS** pattern to search for a group such as a carboxylic acid;
+- turn molecules into **fingerprints** (long strings of 0s and 1s) and **descriptors** (calculated
+  numbers such as molecular weight), to compare them and to use them in models;
+- choose which of these to store, for which job.
 
-Everything here runs in a browser notebook or on any laptop: you need Python, RDKit and pandas.
+From Module 1 we use RDKit's `Chem.MolFromSmiles`, which reads a SMILES string into a molecule, and
+the habit of reporting with `log` and showing values with `print`.
+
+The lesson uses two Python packages:
+
+- **RDKit**, the chemistry toolkit from Module 1. We load five of its parts: `Chem` (reading and
+  writing molecules), `AllChem` (3D shapes), `rdFingerprintGenerator` (making fingerprints),
+  `DataStructs` (comparing fingerprints) and `Descriptors` (calculated properties);
+- **pandas**, for tables with named columns (used at the end to build a small compound table).
+
+Everything here runs in a browser notebook or on any laptop.
 
 ## Setup
 
-Everything this lesson needs is imported and set here, so the settings can be changed in one place.
-Pipeline steps report with `log`; `print` is kept for showing you results; Module 1 explains why.
+Run this block first. It loads the packages and sets the lesson's settings, written in CAPITALS, so
+they can be changed in one place. As in Module 1, `log` reports what a job did and `print` shows you
+values; [Module 1](../01-graphs-and-matrices/#why-log-and-not-print) explains why.
 
 ```python
 import logging
@@ -52,9 +68,25 @@ aspirin = Chem.MolFromSmiles("CC(=O)Oc1ccccc1C(=O)O")
 
 ## 1. SMILES: one molecule, many strings
 
-SMILES writes the graph as a line of text by walking through it. There are many valid walks, so
-one molecule has many SMILES. RDKit's **canonical SMILES** always picks the same one, which makes
-it usable for comparing molecules:
+**SMILES** (Simplified Molecular Input Line Entry System) writes the graph of Module 1 as a line of
+text, by walking from atom to atom and writing down what it meets. The main rules:
+
+- an atom is its element symbol: `C`, `N`, `O`, `Cl`. Hydrogens are left out and filled in by the
+  usual valences, so `CCO` is ethanol, CH3-CH2-OH;
+- lower-case letters (`c`, `n`, `o`) are aromatic atoms, so `c1ccccc1` is benzene;
+- atoms written next to each other are joined by a single bond; `=` is a double bond and `#` a
+  triple bond;
+- brackets `( )` hold a branch: in `CC(=O)O` (acetic acid) the `=O` hangs off the second carbon and
+  the walk then carries on to the last `O`;
+- a matching pair of digits closes a ring: the two atoms marked `1` in `c1ccccc1` are bonded to
+  each other;
+- square brackets hold an atom written in full, with its hydrogens, charge or stereochemistry:
+  `[CH3]`, `[O-]`, `[nH]`, `[C@H]`.
+
+You can start the walk at any atom and take the branches in any order, so one molecule has many
+valid SMILES. RDKit's **canonical SMILES** always picks the same one for a given molecule, which
+makes it usable for comparing molecules. In the code, `{smiles:16}` inside the f-string pads the
+text to 16 characters, so that the arrows line up:
 
 ```python
 for smiles in ["OCC", "CCO", "C(O)C", "[CH3][CH2][OH]"]:
@@ -68,12 +100,14 @@ C(O)C            -> CCO
 [CH3][CH2][OH]   -> CCO
 ```
 
-Canonical means canonical *for one toolkit and version*: another program, or another RDKit
-release, may choose a different canonical form. That is why a database needs an identity that does
-not depend on the toolkit (section 3).
+Canonical means canonical *for one toolkit and version*. (A **toolkit** is a chemistry program or
+package such as RDKit.) Another program, or another RDKit release, may choose a different canonical
+form. That is why a database needs an identity that does not depend on the toolkit (section 3).
 
-**Aromaticity** is a choice too. Benzene can be written with alternating double bonds (Kekulé) or
-with aromatic lower-case atoms; RDKit perceives the aromatic form when it reads the molecule:
+**Aromaticity** is a choice too. Benzene can be written with alternating single and double bonds
+(the Kekulé form, `C1=CC=CC=C1`) or with aromatic lower-case atoms (`c1ccccc1`). When RDKit reads a
+molecule it decides which rings are aromatic (it *perceives* aromaticity), and writes them in lower
+case. `Chem.Kekulize` turns the aromatic form back into alternating bonds:
 
 ```python
 benzene = Chem.MolFromSmiles("C1=CC=CC=C1")
@@ -87,12 +121,17 @@ kekulised:  C1=CC=CC=C1
 ```
 
 Different toolkits perceive aromaticity by different rules, so the same file can give different
-aromatic forms in different programs: one more reason to standardise before storing (Module 7).
+aromatic forms in different programs. That is one more reason to **standardise** before storing,
+that is, to put every molecule into one agreed form (Module 7).
 
 ## 2. What a representation can lose: stereochemistry
 
-Ibuprofen has one stereocentre. The two mirror images (enantiomers) are different molecules with
-different biology, and isomeric SMILES keeps them apart with `@` and `@@`:
+Ibuprofen has one stereocentre: a carbon with four different groups on it. The two mirror images
+(enantiomers, R and S) are different molecules with different biology. **Isomeric SMILES**, SMILES
+that include stereochemistry, keeps them apart with `@` and `@@` inside the square brackets: they
+say whether, looking from the first neighbour written towards the stereocentre, the other three
+neighbours, in the order they are written, go round anticlockwise (`@`) or clockwise (`@@`). `Chem.FindMolChiralCenters` lists each stereocentre as its atom number and
+its R or S label:
 
 ![The two enantiomers of ibuprofen, labelled R and S](figures/ibuprofen-enantiomers.svg)
 
@@ -107,7 +146,10 @@ S: [(10, 'S')] CC(C)Cc1ccc([C@H](C)C(=O)O)cc1
 R: [(10, 'R')] CC(C)Cc1ccc([C@@H](C)C(=O)O)cc1
 ```
 
-Ask for SMILES without stereochemistry, and the two collapse into one:
+Ask for SMILES without stereochemistry, and the two collapse into one. The small function below
+does that. In its first line, `mol: Chem.Mol` and `-> str` are **type hints**: notes that say the
+function takes an RDKit molecule and returns a string (text). Python does not check them; they are
+there for the reader:
 
 ```python
 def flat(mol: Chem.Mol) -> str:
@@ -126,13 +168,21 @@ flat: CC(C)Cc1ccc(C(C)C(=O)O)cc1
 ```
 
 Store the flat form and your database silently merges two different drugs. Sometimes that is what
-you want (grouping a racemate with its enantiomers), but it must be a decision, never an accident.
+you want (grouping a racemate, the 50:50 mixture, with its two enantiomers), but it must be a
+decision, never an accident.
 
 ## 3. InChI and InChIKey: an identity for every molecule
 
-The **InChI** (IUPAC International Chemical Identifier) is a standard, open, layered description
-of a molecule, produced the same way by every program that uses the official software. The
-**InChIKey** is a fixed-length, 27-character hash of it: short enough to index, search and join on.
+The **InChI** (IUPAC International Chemical Identifier) is a standard, open description of a
+molecule. It is written in layers separated by `/`: the formula, then the connections between atoms
+(`c...`), then the hydrogens (`h...`), and further layers for charge and stereochemistry when there
+are any. Every program that uses the official InChI software produces the same InChI for the same
+molecule.
+
+The **InChIKey** is a **hash** of the InChI: a code of fixed length (27 characters) calculated from
+it. The same InChI always gives the same key, but the key cannot be turned back into the InChI. It is
+short enough to use as a label in a database: to look a molecule up quickly, and to match rows of two
+tables that share it (a *join*).
 
 ```python
 print(Chem.MolToInchi(aspirin))
@@ -146,7 +196,8 @@ BSYNRYMUTXBXSQ-UHFFFAOYSA-N
 The key has three blocks. The first 14 letters encode the connectivity (the skeleton). The next
 block has 8 letters for stereochemistry and the other layers, then `S` (a standard InChI) and `A`
 (version 1). The last letter records protonation (`N` for neutral). So the two ibuprofen
-enantiomers share the first block and differ in the second:
+enantiomers share the first block and differ in the second. `key[:14]` takes the first 14
+characters of the key:
 
 ```python
 for name, mol in [("S", s_ibuprofen), ("R", r_ibuprofen)]:
@@ -159,8 +210,13 @@ R HEFNNWSXXWATRW-SNVBAGLBSA-N   skeleton: HEFNNWSXXWATRW
 ```
 
 Grouping on the first 14 letters finds every stereoisomer of a structure; joining on the whole key
-keeps them apart. Standard InChI also treats some mobile hydrogens as one, so certain tautomers
-share a key, which is usually what a database wants:
+keeps them apart.
+
+**Tautomers** are forms of one compound that differ only in where a hydrogen sits (and so which
+bonds are double), and that turn into each other easily: 2-pyridone and 2-hydroxypyridine are one
+example. Standard InChI treats some of these mobile hydrogens as one, so certain tautomers share a
+key, which is usually what a database wants. (In the SMILES below, `[nH]` is an aromatic nitrogen
+that carries a hydrogen.)
 
 ```python
 pyridone = Chem.MolFromSmiles("O=c1cccc[nH]1")
@@ -173,14 +229,17 @@ SMILES equal:   False
 InChIKey equal: True
 ```
 
-InChIKeys are hashes, so two different molecules could in principle share one; in practice
-collisions are extremely rare, but a careful pipeline keeps the full InChI or SMILES beside the key.
+InChIKeys are hashes, so two different molecules could in principle share one (a *collision*). In
+practice collisions are extremely rare, but a careful pipeline keeps the full InChI or SMILES beside
+the key.
 
 ## 4. Molfiles and SDF: the connection table
 
 Before SMILES there were **connection tables**: a list of atoms (with coordinates) and a list of
-bonds between them. The MDL molfile is the classic format, and an SDF file is many molfiles one after
-another, each with optional data fields. Most compound libraries and vendor catalogues arrive as SDF.
+bonds between them. The **molfile**, from the company MDL, is the classic format. An **SDF**
+(structure-data file, ending `.sdf`) is many molfiles one after another, each followed by optional
+data fields such as a name, a price or a measured value. Most compound libraries and vendor
+catalogues arrive as SDF. `Chem.MolToMolBlock` gives a molecule as molfile text:
 
 ```python
 ethanol = Chem.MolFromSmiles("CCO")
@@ -206,9 +265,13 @@ it is much larger: Module 3 measures what each format costs.
 
 ## 5. Three dimensions: conformers
 
-Real molecules are three-dimensional and flexible. RDKit can generate 3D shapes (conformers), but
-one molecule has many, and which you get depends on the method and the random seed (both set in
-the Setup block). `AllChem` holds RDKit's 3D tools:
+Real molecules are three-dimensional and flexible. RDKit can generate 3D shapes, called
+**conformers**, but one molecule has many, and which you get depends on the method and the random
+seed. (The method starts from random numbers; a **seed** is the number the random numbers start
+from, so the same seed gives the same conformers on every run. Both are set in the Setup block.)
+`AllChem` holds RDKit's 3D tools. The code first adds the hydrogens with `Chem.AddHs`, because a 3D
+shape needs them, then generates the conformers and compares the x coordinate of atom 0 in the first
+two:
 
 ```python
 with_h = Chem.AddHs(aspirin)
@@ -224,15 +287,23 @@ print(
 same atoms, different coordinates: True
 ```
 
-So 3D coordinates are not an identity: store them, when a job needs them (docking, shape
-searches), as data *about* a molecule, never as the molecule's key.
+So 3D coordinates are not an identity: store them, when a job needs them (docking, which predicts
+how a molecule fits into a protein, or shape searches), as data *about* a molecule, never as the
+molecule's key.
 
 ## 6. SMARTS: patterns, not molecules
 
-**SMARTS** describes a pattern to search for, not a molecule. A common mistake is to search with a
-molecule written as SMILES. `C(=O)O` read as a molecule matches any carbon double-bonded to one
-oxygen and single-bonded to another: carboxylic acids, but also esters. The SMARTS
-`[CX3](=O)[OX2H1]` asks for that oxygen to carry a hydrogen, so it finds acids only:
+**SMARTS** describes a pattern to search for, not a molecule. It looks like SMILES, but each atom in
+square brackets can carry conditions. A common mistake is to search with a molecule written as
+SMILES. `C(=O)O` read as a molecule matches any carbon double-bonded to one oxygen and
+single-bonded to another: carboxylic acids, but also esters. The SMARTS `[CX3](=O)[OX2H1]` adds
+conditions. `[CX3]` is a carbon with three neighbours, and `[OX2H1]` is an oxygen with two
+neighbours, one of which is a hydrogen. So it finds acids only.
+
+The code keeps the four molecules in a dictionary called `library` (each name points to its
+molecule), and `.items()` goes through the name and molecule pairs. `HasSubstructMatch` says whether
+the pattern occurs anywhere in a molecule. In the printout, `!s:5` turns `True` or `False` into
+text and pads it to 5 characters, so that the columns line up:
 
 ![Four molecules with the carboxylic acid group highlighted where the SMARTS pattern matches](figures/smarts-acid.svg)
 
@@ -264,9 +335,15 @@ searches inside the database.
 ## 7. Fingerprints: molecules as bits
 
 To compare thousands of molecules quickly, we turn each into a **fingerprint**, a fixed-length
-string of bits. A Morgan (circular, ECFP-like) fingerprint looks at every atom's surroundings out to
-a radius, and sets a bit for each environment it finds (the radius and length are set in the Setup
-block). Similar molecules share many bits:
+string of bits (each bit is a 0 or a 1). A **Morgan** fingerprint looks at every atom's
+surroundings out to a radius (radius 2 means the atom, its neighbours, and their neighbours), and
+sets a bit to 1 for each environment it finds. It is also called a circular fingerprint, and it is
+close to the published ECFP (extended-connectivity fingerprint); ECFP4 has radius 2. The radius and
+length are set in the Setup block. Similar molecules share many bits.
+
+The code makes a fingerprint *generator* (an object that makes fingerprints with fixed settings),
+uses it on every molecule in `library`, then compares aspirin with the others. `{similarity:.2f}`
+prints the number to two decimal places:
 
 ![Morgan fingerprint bits of aspirin and salicylic acid, with the bits they share marked](figures/fingerprint-bits.svg)
 
@@ -285,15 +362,26 @@ Tanimoto similarity, aspirin and methyl salicylate: 0.35
 Tanimoto similarity, aspirin and ibuprofen: 0.20
 ```
 
-The **Tanimoto similarity** is the number of bits both have divided by the number either has. A
-fingerprint cannot be turned back into a molecule, and two different molecules can share one: it is
-for comparing and searching, not for identity.
+The **Tanimoto similarity** is the number of bits set in both fingerprints divided by the number set
+in either. It runs from 0 (no bits in common) to 1 (the same bits). A fingerprint cannot be turned
+back into a molecule, and two different molecules can share one: it is for comparing and searching,
+not for identity.
 
 ## 8. Descriptors: molecules as numbers
 
-**Descriptors** are numbers calculated from a molecule: molecular weight, logP (a predicted
-partition coefficient), polar surface area, hydrogen-bond donors. They are what most machine-learning
-models and most filters work with. RDKit's `Descriptors` module calculates them:
+**Descriptors** are numbers calculated from a molecule. Four common ones:
+
+- **MW**, the molecular weight;
+- **logP**, a predicted octanol-water partition coefficient (on a log scale): higher means more
+  greasy;
+- **TPSA**, the topological polar surface area, in Å², an estimate of the surface taken by polar
+  atoms (N, O and their hydrogens);
+- **HBD**, the number of hydrogen-bond donors.
+
+They are what most machine-learning models and most filters (rules such as "molecular weight under
+500") work with. RDKit's `Descriptors` module calculates them. The f-string codes line the table up:
+`>8` puts text on the right of an 8-character space, `8.1f` writes a number 8 characters wide with
+one decimal, and `5d` a whole number 5 characters wide:
 
 ```python
 print(f"{'molecule':18}{'MW':>8}{'logP':>7}{'TPSA':>7}{'HBD':>5}")
@@ -316,6 +404,10 @@ them (Module 13 returns to this).
 
 ## 9. What to store, for which job
 
+The table brings the module together, with the graph and matrices of Module 1. Two terms in it:
+graph neural networks are machine-learning models that read a molecule as a graph (Module 1), and
+clustering means sorting molecules into groups of similar ones.
+
 | Representation | Keeps | Loses | Use it for |
 |---|---|---|---|
 | Canonical isomeric SMILES | Connectivity, stereochemistry, charges | Coordinates; toolkit-specific | Readable storage, exchange, rebuilding the molecule |
@@ -328,7 +420,9 @@ them (Module 13 returns to this).
 | Fingerprints | Local environments, as bits | Can't be reversed; not unique | Similarity search, clustering, machine learning |
 | Descriptors | Chosen properties, as numbers | Structure | Filters, analysis, machine learning |
 
-A sensible first table for a compound library, which the next modules build on:
+A sensible first table for a compound library, which the next modules build on. The code makes one
+dictionary per molecule (column name to value), collects them in a list, and lets pandas turn the
+list into a table; `to_string(index=False)` prints it without row numbers:
 
 ```python
 rows = []

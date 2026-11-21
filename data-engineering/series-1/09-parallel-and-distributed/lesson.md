@@ -5,35 +5,59 @@ requires: rdkit, pandas, pyarrow, joblib, dask, distributed
 ---
 
 Standardising a library and computing its fingerprints is the same small job repeated for every
-molecule, and no molecule depends on another. That makes it the easiest kind of work to spread out:
-split the library into chunks, give each chunk to a different processor core, and put the results
-back together. A laptop has several cores and a server dozens, yet a plain Python loop uses one.
-Data engineers parallelise this kind of work routinely, and they also know where it goes wrong:
-code that runs on Linux and fails on Windows, chunks so small that the overheads eat the gain, and
-jobs that never get faster however many cores they are given.
+molecule, and no molecule depends on another. That makes it the easiest kind of work to spread out.
+A computer's processor chip contains several **cores**, each of which can run a program on its own:
+a laptop has 4 to 16, a server dozens. Yet a plain Python loop uses only one of them. To use more,
+we split the library into **chunks** (for example, 1,500 molecules each), give each chunk to a
+different core, and put the results back together. Doing one thing after another on one core is
+called **serial**; doing several at the same time on several cores is **parallel**.
+
+Data engineers do this kind of work routinely, and they also know where it goes wrong: code that
+runs on Linux and fails on Windows, chunks so small that the extra costs of sending them eat the
+gain, and jobs that never get faster however many cores they are given.
 
 By the end of this module you will be able to:
 
 - run a function over chunks of a library on several cores with joblib, on Windows, macOS and
-  Linux, and check that the results are identical to a serial run;
-- explain why worker functions belong in a module file, and why workers should be sent SMILES
-  rather than RDKit molecules;
-- choose a chunk size, and measure the speed-up;
-- predict where the speed-up levels off, with Amdahl's law, and use threads for work that mostly
-  waits;
-- run the same function over a partitioned Parquet dataset with Dask, lazily, on a local cluster
-  that can be replaced by a real one.
+  Linux, and check that the results are the same as from an ordinary loop;
+- explain why the functions that run on other cores are kept in a file of their own, and why they
+  should be sent SMILES rather than RDKit molecules;
+- choose a chunk size, and measure how much faster the job runs;
+- predict where adding cores stops helping, and use threads for work that mostly waits;
+- run the same function over a folder of Parquet files with Dask, which reads one file at a time
+  and can use the cores of many computers.
 
-We use 12,000 molecules from the teaching library (`chemlib`, as in the earlier modules) and at most
-4 workers, so the lesson runs in about a minute on any laptop. The text says how each step scales to
-the full 1,733,400 molecules and beyond.
+This module builds on [Module 8](../08-larger-than-memory/), which wrote a library as a folder of
+Parquet files and processed it in batches; the canonical SMILES of
+[Module 7](../07-standardisation/) and the Morgan fingerprints of
+[Module 2](../02-text-patterns-and-numbers/) are the work we spread out. We use 12,000 molecules
+from the teaching library (`chemlib`, as in the earlier modules) and at most 4 workers, so the
+lesson runs in about a minute on any laptop. The text says how each step scales to the full
+1,733,400 molecules and beyond.
+
+The lesson uses these packages, each introduced again where it is first used:
+
+- **joblib**, which runs a function on several cores at once;
+- **Dask** (the `dask` and `distributed` packages), which does the same over a folder of files, on
+  one computer or on many;
+- **RDKit** and **pandas** (with **PyArrow** to read Parquet files), as in the earlier modules.
+
+Colab's free computers usually have only two cores, so in Colab, 4 workers will not run four times
+as fast: the timings in this lesson come from a laptop with more cores, and yours will differ.
 
 ## Setup
 
 Everything this lesson needs is imported and set here, so the settings can be changed in one
 place. Pipeline steps report with `log`; `print` is kept for showing you results; Module 1 explains
-why. The functions that run in other processes are in their own file, `workers.py`, next to this
-lesson; section 2 explains why.
+why.
+
+A running program is called a **process**. To use several cores, Python starts extra processes,
+called **workers**, and hands each one a chunk. The functions the workers run are kept in their own
+file, `workers.py`, next to this lesson (section 2 explains why). A Python file like this, loaded
+with `import`, is called a **module**. In Colab, the first cell of the notebook downloads
+`workers.py` for you; you can open it from the Files panel on the left to read it. The line
+`sys.path.insert(...)` adds the lesson's folder to the list of places Python looks for modules, so
+`import workers` finds the file.
 
 ```python
 import logging
@@ -87,8 +111,9 @@ WORK.mkdir(exist_ok=True)
 ### The worker function
 
 The job for each molecule: read the SMILES, write the canonical SMILES (a stand-in for the full
-standardisation of Module 7), and compute the molecular weight, the polar surface area and a Morgan
-fingerprint. The function that does it, `workers.describe`, was imported in the Setup block:
+standardisation of Module 7), and compute the molecular weight, the polar surface area (TPSA) and a
+Morgan fingerprint, of which we keep the number of bits set to 1 (`bits_on`). The function that
+does it, `workers.describe`, was imported in the Setup block:
 
 ```python
 library = chemlib.library(N_MOLECULES, seed=SEED)
@@ -111,7 +136,9 @@ a good amount of work. Each row is a named tuple (`collections.namedtuple`, defi
 
 ### The serial run
 
-First, the plain way, on one core. Timings depend on the computer, so this output is an example:
+First, the plain way, on one core. `time.perf_counter()` reads a stopwatch: the difference between
+two readings is the time in seconds between them. µs is a microsecond, a millionth of a second.
+Timings depend on the computer, so this output is an example:
 
 ```python
 start = time.perf_counter()
@@ -132,11 +159,20 @@ INFO all 1,733,400 would take about 7 minutes
 
 ### Chunks and workers
 
-**joblib** is the standard tool for this in Python (scikit-learn uses it). `Parallel` starts a set of
-worker processes, `delayed(f)(chunk)` describes one call without making it, and joblib sends the
-calls to the workers and returns the results in the order the calls were given, whichever worker
-finished first. We split the SMILES into chunks of 1,500 (`CHUNK`) and use 4 workers
-(`N_JOBS`):
+**joblib** is the standard tool for this in Python (scikit-learn, the machine-learning package, uses
+it). It needs three things:
+
+- `Parallel(n_jobs=4)` starts a set of 4 worker processes;
+- `delayed(workers.describe)(chunk)` writes down the call `workers.describe(chunk)` without making
+  it, so joblib can send it to a worker instead;
+- `Parallel(...)(... for chunk in chunks)` takes one such call per chunk, sends the calls to the
+  workers, and returns the results in the order the calls were given, whichever worker finished
+  first.
+
+We split the SMILES into chunks of 1,500 (`CHUNK`) and use 4 workers (`N_JOBS`). In `chunked`,
+`items[i : i + size]` is a slice, the items from position `i` up to (not including) `i + size`.
+joblib gives back one list of rows per chunk, and `[row for part in parts for row in part]` joins
+them into one list:
 
 ![The library is split into chunks of SMILES; each chunk goes to a free worker process, which returns its rows; the results are joined in the original order](figures/chunks-to-workers.svg)
 
@@ -183,14 +219,15 @@ INFO n_jobs=2: 1.4 s, 2.0 times the serial speed
 INFO n_jobs=4: 0.8 s, 3.5 times the serial speed
 ```
 
-The speed-up grows with the workers but falls short of the number of workers, and the gap widens
-as workers are added. Section 5 explains why, and the figure there shows the same measurement up to
+The **speed-up** is the serial time divided by the parallel time: 2.0 means twice as fast. It grows
+with the workers but falls short of the number of workers, and the gap widens as workers are added. Section 5 explains why, and the figure there shows the same measurement up to
 8 workers.
 
 ### Why joblib, and not multiprocessing directly
 
-Python's standard library has `multiprocessing`, and joblib is built on the same idea, so why not
-use it directly? Because of how new processes start, which differs between operating systems:
+Python's standard library (the modules that come with Python itself) has `multiprocessing`, and
+joblib is built on the same idea, so why not use it directly? Because of how new processes start,
+which differs between operating systems (Windows, macOS, Linux):
 
 - **fork** copies the running process, with everything already defined in it. It was the default on
   Linux until Python 3.14.
@@ -201,9 +238,16 @@ use it directly? Because of how new processes start, which differs between opera
 So code written and tested on a Linux server with fork often fails on a colleague's Windows laptop:
 a function defined in a notebook cannot be found by the workers, and a script without the
 `if __name__ == "__main__":` guard is re-run by every worker, which then tries to start workers of
-its own and stops with an error. With
-plain `multiprocessing`, a script that works everywhere looks like this (shown here, not run,
-because the guard only works in a script run on its own):
+its own and stops with an error. The guard is a line that is true only in the script you started
+yourself, not when a worker imports it, so the code under it runs once.
+
+With plain `multiprocessing`, a script that works everywhere looks like this. It is shown here, not
+run: the guard only works in a script run on its own, so it cannot run in Colab or a notebook. On
+your own computer you would save it as a file, say `describe_all.py`, in the lesson's folder (next
+to `workers.py`), and run it from a terminal opened in that folder with
+`uv run python describe_all.py` (the Start here page shows how to set this up). As written it
+prints nothing; it is the shape of such a script, not a finished one (`chunks` would have to be
+made first):
 
 ```py
 import multiprocessing
@@ -215,17 +259,20 @@ if __name__ == "__main__":  # without this, each spawned worker re-runs the scri
         parts = pool.map(describe, chunks)
 ```
 
-joblib's default backend, **loky**, avoids both problems: it starts its workers without re-running
-your script, and it serialises functions with `cloudpickle`, which can send a function defined in a
-notebook. The same `Parallel` call therefore works in a notebook, in a script and in CI, on Windows,
-macOS and Linux. Keeping worker functions in a module file is still the safest habit: it works with
+joblib's default way of starting workers (its **backend**), called **loky**, avoids both problems:
+it starts its workers without re-running your script, and it packs functions up for sending with
+`cloudpickle`, which can send a function defined in a notebook. The same `Parallel` call therefore
+works in a notebook, in a script and in CI (continuous integration: the automatic test runs the
+course's code gets on every change), on Windows, macOS and Linux. Keeping worker functions in a module file is still the safest habit: it works with
 every backend, including `multiprocessing` and Dask clusters, and the functions can be tested.
 
 ## 3. What to send: SMILES, not molecules
 
-Everything sent to a worker process is **pickled** (turned into bytes), copied to the other
-process and unpickled there, and the results come back the same way. What we send therefore has a
-cost. Compare one chunk of SMILES with the same chunk as RDKit molecules:
+Each worker process has its own memory, so it cannot simply look at the main process's data.
+Everything sent to a worker is **pickled** (turned into bytes, with Python's `pickle` module),
+copied to the other process and unpickled there, and the results come back the same way. What we
+send therefore has a cost. Compare one chunk of SMILES with the same chunk as RDKit molecules
+(`pickle.dumps` returns the bytes, and `len` counts them; a kB is a thousand bytes):
 
 ```python
 chunk = chunks[0]
@@ -246,9 +293,10 @@ text, parse in the worker, and send back plain values (strings, numbers), not mo
 
 ## 4. Choosing a chunk size
 
-Each chunk is a separate task, and each task has a fixed cost: it is pickled, queued, sent and
-collected. Very small chunks spend their time on that; very large ones leave workers idle, because
-when there are fewer chunks than workers, or one chunk is slow, the others wait at the end. Time
+Each chunk is a separate **task** (one piece of work handed to a worker), and each task has a fixed
+cost, its **overhead**: it is pickled, queued, sent and collected. Very small chunks spend their
+time on that; very large ones leave workers idle, because when there are fewer chunks than workers,
+or one chunk is slow, the others wait at the end. Time
 the 12,000 molecules with 4 workers and three chunk sizes. `batch_size=1` tells joblib to send
 every chunk as a task of its own, as plain `multiprocessing` would:
 
@@ -281,8 +329,13 @@ then with `n` workers the best possible speed-up is
 
 `speed-up = 1 / ((1 - p) + p / n)`
 
-This is **Amdahl's law** (Amdahl, 1967). However many workers you add, the speed-up never passes
-`1 / (1 - p)`:
+This is **Amdahl's law** (Amdahl, 1967). For example, if 90% of a job can run in parallel
+(`p = 0.9`) and we use 4 workers, the serial 10% still takes its full time and the other 90% takes
+a quarter of its time: `0.1 + 0.9 / 4 = 0.325` of the original time, a speed-up of
+`1 / 0.325 = 3.1`, not 4. However many workers you add, the speed-up never passes `1 / (1 - p)`,
+because the serial part never shrinks. The table works this out for several cases (in the
+f-strings, `>17` and `>7` right-align a value in a space of 17 or 7 characters, so the columns line
+up):
 
 ```python
 def amdahl(p: float, n: int) -> float:
@@ -311,16 +364,18 @@ sending them (section 3), or writing every result through one connection.
 
 ![Measured speed-up of the describe step against the number of joblib workers, beside the ideal (as many times faster as there are workers) and Amdahl's law fitted to the measurements: one measured run on one laptop, yours will differ](figures/speed-up.svg)
 
-Other limits are physical: a laptop with 4 performance cores gains little from 16 workers, workers
-compete for memory and memory bandwidth, and libraries that already use several threads (NumPy's
+Other limits are physical: a laptop with 4 fast cores gains little from 16 workers, workers
+compete for memory and for the speed at which data moves to and from it, and libraries that already use several threads (NumPy's
 linear algebra, for example) can slow each other down when run in many processes at once.
 
 ### Work that mostly waits: threads
 
 Some jobs are slow because they wait, not because they compute: downloading records from PubChem or
-ChEMBL (Module 11), or reading from a database. Waiting needs no processor, so threads, which are
-cheaper to start than processes and share memory, are enough. `workers.look_up` stands in for a web
-request that takes 50 milliseconds:
+ChEMBL (Module 11), or reading from a database. Waiting needs no processor, so threads are enough.
+A **thread** is a second line of work inside the same process: threads are cheaper to start than
+processes and share the process's memory, so nothing has to be pickled. `prefer="threads"` tells
+joblib to use threads instead of worker processes. `workers.look_up` stands in for a web request
+that takes 50 milliseconds:
 
 ```python
 ids = list(library["id"][:N_LOOK_UPS])
@@ -338,23 +393,32 @@ INFO 40 look-ups one by one: 2.2 s; with 8 threads: 0.3 s
 same results: True
 ```
 
-For computing in pure Python, threads do not help: Python's global interpreter lock lets only one
-thread run Python code at a time (Python 3.13 added an optional build without it, which not
+For computing in pure Python, threads do not help: Python's **global interpreter lock** (the GIL, a
+rule inside Python that keeps its threads from getting in each other's way) lets only one thread
+run Python code at a time (Python 3.13 added an optional build without it, which not
 every package supports yet). Use processes to compute, threads to wait, and for real web services,
-keep to their rate limits whichever you use (Module 11).
+keep to their rate limits (the number of requests per second they allow) whichever you use
+(Module 11).
 
 ## 6. Beyond one machine's memory: Dask
 
-joblib spreads work over the cores of one computer, and the data still pass through the main
-process. **Dask** goes further: it splits a table into **partitions**, plans the work as a graph of
-small tasks, and runs the graph on the cores of one computer or on the workers of a cluster, reading
+joblib spreads work over the cores of one computer, and all the data still pass through the main
+process, so they must fit in its memory. **Dask** goes further: it splits a table into
+**partitions** (pieces of the table, here one per Parquet file; a broader use of the word than the
+vendor folders of Module 8), plans the work as a set of small tasks, and runs them on the cores of
+one computer or on the workers of a **cluster** (a group of computers that work together), reading
 each partition only when a task needs it. Module 8 showed how to keep a library as a folder of
 Parquet files; Dask works directly on such a folder.
+
+This section is a step up from joblib, because Dask first writes down a plan and only runs it when
+asked. The steps are: write a folder of files; tell Dask what to do with each file (nothing runs);
+start a cluster of workers; then ask for the result, which runs the plan.
 
 ### A Parquet folder to work on
 
 Write 24,000 molecules (twice as many as before) as six Parquet files of 4,000, streaming them so
-they are never all in memory:
+they are never all in memory (as in Module 8). `f"part-{k:02d}.parquet"` writes the batch number
+with two digits, so the files are named `part-00`, `part-01` and so on, and sort in order:
 
 ```python
 shutil.rmtree(MOLECULES, ignore_errors=True)
@@ -369,10 +433,17 @@ print(sorted(p.name for p in MOLECULES.iterdir()))
 
 ### Lazy partitions and a task graph
 
-`dask.dataframe.read_parquet` reads only the files' footers: their schema and size. The table it
-returns looks like a pandas table but holds a plan, not data. `map_partitions` adds "run this
-function on each partition" to the plan; `meta` tells Dask what the result will look like, so it
-does not have to run the function to find out. Nothing is computed yet:
+`dask.dataframe.read_parquet` reads only the files' footers (the short summary at the end of each
+Parquet file): their schema and size. The table it returns looks like a pandas table but holds a
+plan, not data; work that waits until it is asked for like this is called **lazy**.
+`map_partitions` adds "run this function on each partition" to the plan. The function,
+`workers.describe_frame`, takes one partition as a pandas table and returns its described rows.
+
+`meta` tells Dask what the result will look like (its columns and their types), so it does not
+have to run the function to find out. We build it as an empty pandas table: `workers.COLUMNS` is a
+dictionary from each result column's name to its type, and `**` unpacks a dictionary into another,
+so `{"id": [], "vendor": [], **{...}}` is one dictionary with all the columns. Nothing is computed
+yet:
 
 ```python
 molecules = dd.read_parquet(MOLECULES)
@@ -395,10 +466,12 @@ script and CI with no `if __name__ == "__main__":` guard. That keeps the lesson 
 threads share Python's interpreter lock, so this cluster shows *how* Dask runs the work, not a
 speed-up; for RDKit work, a cluster needs worker processes, as below. The cluster also serves a
 **dashboard**, a web page showing every task as it runs; `client.dashboard_link` gives its address
-(it needs the `bokeh` package installed).
+(it needs the `bokeh` package installed, and is not used in this lesson).
 
 `to_parquet` runs the whole plan: each partition is read, described and written to its own file,
-and no partition waits for the others to finish:
+and no partition waits for the others to finish. We then read the results back and summarise them
+by vendor; `.compute()` is the call that tells Dask "run the plan now and give me a pandas table".
+At the end, `close()` stops the cluster:
 
 ```python
 cluster = LocalCluster(n_workers=1, threads_per_worker=DASK_THREADS, processes=False)
@@ -438,16 +511,18 @@ print(len(rows), "rows; Dask matches a direct call:", rows == direct)
 ### The same code on a cluster
 
 Nothing in the Dask code above depends on where the workers are. On a cluster, the only change is
-the `Client`:
+the `Client`, which is given the network address of the cluster's **scheduler** (the program that
+hands tasks to the workers). This line is shown, not run, because it needs a real cluster:
 
 ```py
 client = Client("tcp://scheduler-address:8786")   # a cluster someone has started
 ```
 
 and the same `read_parquet`, `map_partitions` and `to_parquet` run on its workers, which read their
-partitions straight from shared storage (a network drive, or object storage such as Amazon S3).
-Universities' batch systems (SLURM, PBS) start Dask workers as ordinary jobs with the
-`dask-jobqueue` package, and cloud platforms with Kubernetes. To describe all 1,733,400 molecules,
+partitions straight from shared storage (a network drive, or cloud storage such as Amazon S3).
+Universities' shared computers (often run with a queue of jobs, by systems called SLURM or PBS)
+start Dask workers as ordinary jobs with the `dask-jobqueue` package, and cloud platforms do it
+with a system called Kubernetes. To describe all 1,733,400 molecules,
 or a billion, change the input folder: more partitions, the same code, and memory per worker set by
 the partition size, not the library size.
 

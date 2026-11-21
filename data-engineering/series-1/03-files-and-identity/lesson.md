@@ -13,20 +13,47 @@ how the molecule happened to be written, or on which program wrote it.
 
 By the end of this module you will be able to:
 
-- write one library as SDF, SMILES, CSV and Parquet, and say what each costs and what each keeps;
-- read a large SDF one record at a time, counting and recording the records that cannot be read;
-- avoid the usual CSV faults with chemical data, and use a Parquet schema to keep column types;
-- find duplicate molecules with InChIKeys, even when they are written as different SMILES;
-- explain why identity must not depend on one toolkit's canonical SMILES;
-- check that a file arrived unchanged with a SHA-256 checksum.
+- write one library of molecules as an SDF, a SMILES file, a CSV and a Parquet file (four file
+  formats, explained in section 1), and say how big each is and what each keeps;
+- read a large SDF one record at a time, without loading it all, and keep a list of the records
+  that cannot be read and why;
+- avoid the usual mistakes when chemical data goes through a CSV, and keep each column's type
+  (text, decimal number, whole number) by saving the table as Parquet;
+- find the same molecule listed twice, even when it is written as two different SMILES, by
+  comparing InChIKeys;
+- explain why a molecule's identity must not be one program's canonical SMILES;
+- check that a file arrived unchanged, with a checksum.
 
-Everything here runs in a browser notebook or on any laptop: you need Python, RDKit, pandas, PyArrow
-and Open Babel. The files the code writes go into a `work/` folder next to the lesson.
+This module builds on [Module 2](../02-text-patterns-and-numbers/): SMILES and canonical SMILES
+(section 1 there), the InChIKey (section 3) and the SDF (section 4). It also uses `log` and `print`
+as in [Module 1](../01-graphs-and-matrices/#why-log-and-not-print).
+
+The lesson uses these packages:
+
+- **RDKit**, the chemistry toolkit of Modules 1 and 2, to read and write molecules and SDF files;
+- **pandas**, for tables, and its readers and writers for CSV and Parquet files;
+- **PyArrow**, to write Parquet files with column types that we choose;
+- **Open Babel**, a second open-source chemistry toolkit, to compare with RDKit (section 6);
+- **chemlib**, a small helper file that comes with this course. It makes the teaching library of
+  molecules used in the lessons, and the damaged copies of it used to practise on;
+- a few modules that come with Python itself: `csv` (CSV files), `gzip` (compressed files),
+  `hashlib` (checksums), `io`, `shutil` and `pathlib` (files and folders), `time` (timing) and
+  `collections` (counting).
+
+Everything here runs in a browser notebook or on any laptop. The files the code writes go into a
+`work/` folder next to the lesson, which the Setup block creates.
 
 ## Setup
 
-Everything this lesson needs is imported and set here, so the settings can be changed in one place.
-Pipeline steps report with `log`; `print` is kept for showing you results; Module 1 explains why.
+Run this block first. It loads the packages and sets the lesson's settings, written in CAPITALS, so
+they can be changed in one place. A few things in it may be new:
+
+- `Path("work")` is a path to a folder, from `pathlib`. Joining paths uses `/`, so
+  `WORK / "library.sdf"` means the file `library.sdf` inside `work`. The last line,
+  `WORK.mkdir(exist_ok=True)`, makes the folder, and does nothing if it is already there;
+- `20_000` is the number 20000: Python ignores the underscore, which is there to make it easy to
+  read;
+- `1 << 20` is 2 to the power 20, that is 1,048,576 bytes, one mebibyte (MiB).
 
 ```python
 import csv
@@ -84,7 +111,9 @@ WORK.mkdir(exist_ok=True)
 ## 1. One library, five files
 
 We use a teaching library made in code by `chemlib`, the same on every computer: 20,000 molecules,
-each with an ID, a SMILES and the catalogue data a vendor file carries (vendor, price, stock).
+each with an ID, a SMILES and the catalogue data a vendor file carries (vendor, price, stock). The
+molecules are made the way real screening libraries are: by joining small building blocks onto a
+few core structures (scaffolds). The `seed` makes the random choices repeatable, as in Module 2:
 
 ```python
 library = chemlib.library(LIBRARY_SIZE, seed=LIBRARY_SEED)
@@ -98,10 +127,30 @@ ML-00000129 c1cc(OCC)ccc1C(=O)NCc2ccc(C(F)(F)F)cc2 Vendor A     134.51       420
 ```
 
 We write it in the four formats of this module, plus the gzipped SDF that vendors usually send.
-**SDF** gives each molecule a connection table (atoms with 2D coordinates, then bonds) followed by
-its data fields. A **SMILES file** (`.smi`) holds one SMILES and one name per line, nothing else.
-**CSV** is a plain-text table. **Parquet** is a binary, column-by-column table with a schema that
-records each column's type; we give the schema ourselves rather than let a tool guess it.
+
+- **SDF** gives each molecule a connection table (atoms with 2D coordinates, then bonds) followed by
+  its data fields, as in Module 2.
+- A **SMILES file** (`.smi`) holds one SMILES and one name per line, nothing else.
+- **CSV** (comma-separated values) is a plain-text table: one row per line, the values separated by
+  commas. Spreadsheets open and save it.
+- **Parquet** is a table stored in binary (as raw bytes, not as text you can read) and column by
+  column. It holds a **schema**, which records each column's name and type; we give the schema
+  ourselves rather than let a tool guess it.
+- **gzip** compresses a file (makes it smaller without losing anything), like a zip file; a gzipped
+  file gets `.gz` added to its name.
+
+A few Python features appear in the code for the first time:
+
+- `with ... as writer:` opens something (a file, a writer) for the indented lines below it, and
+  closes it properly when they finish, even if an error stops them;
+- `df.itertuples(index=False)` goes through a table one row at a time, and `row.smiles` is that
+  row's value in the `smiles` column;
+- `mol.SetProp(name, text)` stores a data field on a molecule; the field `_Name` is the record's
+  first line, its title;
+- `f"{row.price_usd:.2f}"` writes the price with two decimals, and `{size / 1e6:6.2f}` the size in
+  megabytes (`1e6` is a million) in a space 6 characters wide;
+- in the schema, `pa.string()` is text, `pa.float64()` a decimal number and `pa.int64()` a whole
+  number.
 
 ```python
 def write_sdf(df: pd.DataFrame, path: Path) -> None:
@@ -176,7 +225,17 @@ together, so similar values sit side by side and compress well, and its numbers 
 binary numbers rather than as text. File sizes are the same every time for the same library and
 the same versions of RDKit and PyArrow; other versions may differ by a few bytes.
 
-Reading each file back into a table takes very different times:
+Reading each file back into a table takes very different times. The code keeps one reading function
+per format in a dictionary, times each with `time.perf_counter()` (a stopwatch: the time read before
+and after), and prints the row count with `{...:,}`, which adds commas to large numbers. Three more
+features:
+
+- `lambda path: ...` is a one-line function without a name, used here to read the SMILES file as a
+  table whose values are separated by spaces;
+- `**mol.GetPropsAsDict()` copies all of a molecule's data fields (name and value) into the
+  dictionary being built;
+- `opener = gzip.open if ... else open` picks the gzip reader when the file name ends in `.gz`, and
+  the ordinary one otherwise.
 
 ```python
 def read_sdf_table(path: Path) -> pd.DataFrame:
@@ -216,8 +275,10 @@ something needs them.
 
 ## 2. What each format keeps and loses
 
-Write a table and read it back, and check what survived. Parquet gives back exactly what went in,
-column types included, because the types are written in the file:
+Write a table and read it back, and check what survived (a *round trip*). Parquet gives back exactly
+what went in, column types included, because the types are written in the file. Below, `.equals`
+checks that two tables are identical, and `dtypes` lists each column's type (`double` and `float64`
+are both decimal numbers, `int64` a whole number, `str` and `string` text):
 
 ```python
 print(pq.read_schema(files["Parquet"]).remove_metadata())
@@ -256,7 +317,9 @@ print(mol.GetPropsAsDict())
 {'catalogue_no': 417}
 ```
 
-Text also cuts the other way. Give RDKit a number to write, and it writes every digit it has:
+Text also cuts the other way. Give RDKit a number to write, and it writes every digit it has.
+`SetDoubleProp` stores the price as a number rather than as text, and `io.StringIO()` is a text
+"file" kept in memory, so we can see what the writer writes without making a real file:
 
 ```python
 mol.SetDoubleProp("price_usd", 57.66)
@@ -277,6 +340,7 @@ $$$$
 
 ```
 
+Computers store decimal numbers in binary, usually as a **double** (a 64-bit floating-point number).
 57.66 has no exact binary form, and the file shows the nearest double, to 17 digits. That is why
 `write_sdf` above formats prices as text with two decimals itself. In short:
 
@@ -293,18 +357,30 @@ $$$$
 20,000 molecules, but vendor catalogues run to millions of records and tens of gigabytes, and a
 list of millions of molecules will not fit in memory. Two habits make SDF reading safe at any size:
 
-- **Stream.** `ForwardSDMolSupplier` reads one record at a time from any open file, including a
-  gzip stream, so nothing is unpacked to disk and only one molecule is in memory at once. Wrap it
-  in a generator, and the rest of the code sees records one by one.
-- **Expect failures, and record them.** Some records will not parse: a valence no atom can have, a
-  record cut short. The reader returns `None` for those. Count them and keep their record number
-  and the reason, so someone can go back to the file and the supplier.
+- **Stream.** Reading a file in small pieces, one after another, instead of all at once, is called
+  *streaming*. `ForwardSDMolSupplier` reads one record at a time from any open file, including a
+  gzipped one, so nothing is unpacked to disk and only one molecule is in memory at once. Wrap it
+  in a generator (explained below), and the rest of the code sees records one by one.
+- **Expect failures, and record them.** Some records will not *parse* (be read into a molecule): a
+  valence no atom can have, a record cut short. The reader returns `None` (Python's "nothing") for
+  those. Count them and keep their record number and the reason, so someone can go back to the
+  file and the supplier.
 
-To see failures, we make a file like a careless vendor would: `add_defects` damages 5% of a
-2,000-molecule library, and the writer below skips the valence check, so impossible molecules get
-written. Records whose SMILES cannot be read at all never make it into the file; the writer logs
-how many it wrote and how many it skipped, as a job would. Then we cut the last 300 bytes off, as
-an interrupted download would (the sizes, seeds and rate are set in the Setup block):
+When RDKit reads a molecule it also **sanitises** it: it checks the valences, perceives aromaticity
+and tidies up the structure. A molecule that fails these checks is not returned.
+
+To see failures, we make a file like a careless vendor would. `chemlib.add_defects` damages 5% of a
+2,000-molecule library in the ways real files are damaged, and adds a `defect` column naming the
+damage: a salt or solvent mixed in, an impossible valence, an unexpected element, a SMILES that
+cannot be read (`invalid`), or a molecule listed twice. Undamaged rows have an empty `defect`, so
+they are the first, unnamed line of the count printed below. The writer then skips the valence
+check, so impossible molecules get written. (The flags `SANITIZE_ALL ^ SANITIZE_PROPERTIES` mean
+"every check except the valence check".) Records whose SMILES cannot be read at all never make it
+into the file; the writer logs how many it wrote and how many it skipped, as a job would. Finally,
+`read_bytes()[:-TRUNCATED_BYTES]` keeps every byte of the file except the last 300, as an
+interrupted download would. The sizes, seeds and rate are set in the Setup block, and
+`RDLogger.DisableLog` turns off RDKit's own error messages, because we record the failures
+ourselves:
 
 ```python
 RDLogger.DisableLog("rdApp.*")  # we record every failure ourselves, below
@@ -349,12 +425,22 @@ duplicate      16
 INFO wrote 1999 records to vendor.sdf; skipped 17 unreadable SMILES
 ```
 
-The reader is a generator. It reads without sanitising, then sanitises each molecule itself, so it
-can keep RDKit's reason for every failure. RDKit raises a `MolSanitizeException` (or one of its
-subclasses, such as `AtomValenceException`) when a molecule cannot be sanitised, and that is the
-only error we catch: anything else is a bug and should stop the run. The loop below logs a warning
-for each failed record, with its number and reason, and `Counter`, imported in the Setup block,
-counts the reasons and sorts them, most common first, in one step:
+The reader is a **generator**: a function that uses `yield` instead of `return`. Each time the loop
+that uses it asks for the next item, the function runs until the next `yield`, hands back that one
+item, and waits. So the records come out one at a time, and the file is never read all at once. The
+type hint `Iterator[tuple[int, Chem.Mol | None, str]]` says what it hands back: a record number, a
+molecule or `None` (the `|` means "or"), and a reason. `enumerate` numbers the records from 0.
+
+It reads without sanitising, then sanitises each molecule itself, so it can keep RDKit's reason for
+every failure. When something goes wrong, Python *raises an error* (an exception), which normally
+stops the program. `try:` runs some lines, and `except SomeError as error:` runs instead if that
+error is raised, with the error's message in `error`. RDKit raises a `MolSanitizeException` (or a
+more specific kind of it, such as `AtomValenceException`) when a molecule cannot be sanitised, and
+that is the only error we catch: anything else is a bug and should stop the run.
+
+The loop below logs a warning for each failed record, with its number and reason. `Counter`,
+imported in the Setup block, counts the reasons: `reasons[reason] += 1` adds one to that reason's
+count, `.total()` adds up all the counts, and `.most_common()` lists the reasons, most common first:
 
 ```python
 def records(path: Path) -> Iterator[tuple[int, Chem.Mol | None, str]]:
@@ -419,7 +505,19 @@ failures stopped the reading.
 Section 2 showed that SDF data fields are text and that guessing their types goes wrong. So we
 convert each field ourselves, to the type we chose, and write the rows to Parquet a batch at a time
 with a fixed schema. Memory stays flat however long the file is, and the same code turns a
-ten-million-record catalogue into Parquet. Each row also gets the molecule's InChIKey (section 5):
+ten-million-record catalogue into Parquet. Each row also gets the molecule's InChIKey (section 5).
+
+The code is longer than before, but it does four simple things:
+
+1. `ROW_SCHEMA` lists the columns of the output table and their types;
+2. `typed_row` turns one molecule into one row (a dictionary of column name to value), converting
+   each field with `float(...)` or `int(...)` ourselves;
+3. `sdf_to_parquet` goes through the records with `records`, collects rows in a list called
+   `batch`, and every `BATCH_SIZE` rows writes the batch to the file and empties the list. Rows left
+   over at the end are written last. Failed records are logged and kept in `failures`;
+4. `pq.ParquetWriter` writes the file a batch at a time. Each batch becomes one **row group**, the
+   block of rows Parquet stores together, and `pa.Table.from_pylist` turns a list of dictionaries
+   into a table with our schema.
 
 ```python
 ROW_SCHEMA = pa.schema(
@@ -493,7 +591,8 @@ Module 8 takes this further, for libraries far larger than memory.
 CSV looks simple: values separated by commas. Chemistry breaks it in several ways at once. Here is
 a small catalogue of the kind that arrives by email, with catalogue numbers that start with zeros,
 names that contain commas and apostrophes, a SMILES with a `#` (a triple bond), prices written as
-text and storage temperatures with a degree sign:
+text and storage temperatures with a degree sign. `csv.DictWriter` writes a list of dictionaries
+as a CSV, one row each, with a header line of column names:
 
 ```python
 catalogue = [
@@ -520,7 +619,9 @@ catalogue_no,name,smiles,price,storage
 ```
 
 Python's `csv` module did the right thing: it put quotes around the values that contain commas.
-Code that splits lines on commas by hand ignores the quotes, and the columns no longer line up:
+Code that splits lines on commas by hand ignores the quotes, and the columns no longer line up.
+(In the first line of the code, `header, *lines = ...` puts the first line in `header` and all the
+others in the list `lines`.)
 
 ```python
 header, *lines = csv_file.read_text(encoding="utf-8").splitlines()
@@ -562,9 +663,12 @@ print(pd.read_csv(csv_file, comment="#")["smiles"].tolist())
 ['Oc1ccc(Cl)cc1Cl', 'CC', 'CC(=O)c1ccc(O)cc1']
 ```
 
-Then there is the encoding. A CSV file does not say which one it uses. The same table saved by an
-older Windows program is often in the Windows-1252 code page, not UTF-8, and the degree sign and
-the en dash become different bytes:
+Then there is the **encoding**: the rule that turns characters into bytes in the file. **UTF-8** is
+today's standard and covers every character in every language. A CSV file does not say which
+encoding it uses. The same table saved by an older Windows program is often in Windows-1252 (also
+called `cp1252`), an older encoding for Western European text, and the degree sign and the en dash
+become different bytes. pandas expects UTF-8 and stops with an error; told the right encoding, it
+reads the file:
 
 ```python
 old_file = WORK / "catalogue-cp1252.csv"
@@ -582,7 +686,13 @@ UnicodeDecodeError: invalid start byte
 
 The fix is to stop guessing. Read the CSV once, carefully, saying what each column is, turn the
 prices into numbers, and store the result as Parquet with a schema. From then on, every program
-that reads the file gets the same columns with the same types, and the text is always UTF-8:
+that reads the file gets the same columns with the same types, and the text is always UTF-8.
+
+In the code, `dtype={"catalogue_no": str}` tells pandas to keep the catalogue numbers as text.
+`clean.pop("price")` takes the price column out of the table. `.str.replace("[$,]", "", regex=True)`
+removes characters from it: `[$,]` is a **regular expression**, a small pattern language for text,
+and in it square brackets mean "any one of these characters", here a dollar sign or a comma.
+`.astype(float)` then turns the text into numbers:
 
 ```python
 clean = pd.read_csv(csv_file, dtype={"catalogue_no": str}, encoding="utf-8")
@@ -618,7 +728,10 @@ automatically.
 
 A library should hold each molecule once. Comparing SMILES strings does not find repeats, because
 one molecule has many SMILES (Module 2). Canonical SMILES and InChIKeys both give one string per
-molecule. Count the distinct values in our 20,000-molecule library each way:
+molecule. Count the distinct values in our 20,000-molecule library each way. `compounds` is the
+table we wrote to Parquet in section 3, with RDKit's canonical SMILES and the InChIKey of each
+molecule. `nunique()` counts the different values in a column, and `groupby("inchikey").size()`
+counts how many rows share each InChIKey:
 
 ```python
 print("distinct SMILES as written:", library["smiles"].nunique())
@@ -638,8 +751,10 @@ molecules listed more than twice: 0
 
 As written, every SMILES is different. Canonical SMILES and InChIKeys agree that 109 molecules
 are listed twice, each under two IDs: about 0.5% of the library.
-These are real duplicates of the kind every enumerated library has: two building blocks on
-symmetric positions of a scaffold, swapped, give the same molecule. One pair:
+These are real duplicates of the kind every enumerated library (one made by combining building
+blocks in every allowed way) has: two building blocks on symmetric positions of a scaffold,
+swapped, give the same molecule. The code picks the first InChIKey listed twice, and `merge` adds
+the SMILES as written, matching rows on their `id`. One pair:
 
 ![Two library entries with different IDs and different SMILES that are the same molecule, with their shared InChIKey](figures/duplicate-group.svg)
 
@@ -660,7 +775,20 @@ molecule written from the other side.
 
 The same works for duplicates that a supplier adds by mistake. `add_defects` adds some molecules a
 second time, written as a different, randomly ordered SMILES, with `-dup` on the ID. Compare the
-strings and you find none of them; compare InChIKeys and you find them all:
+strings and you find none of them; compare InChIKeys and you find them all.
+
+The code works on whole columns at once, each giving one `True` or `False` per row:
+
+- `.map(inchikey)` runs the function `inchikey` on every SMILES in the column;
+- `duplicated(keep=False)` is `True` for every row whose value appears in another row too;
+- `notna()` is `True` where there is a value (the key is missing for SMILES RDKit cannot read), and
+  `&` means "and";
+- `isin(added_keys)` is `True` where the value is one of those keys;
+- `.sum()` on such a column counts the `True`s, and `[added]` keeps only the rows where `added` is
+  `True`.
+
+The last three lines find one added duplicate, remove `-dup` from its ID with `removesuffix`, and
+print every row whose ID starts with what is left:
 
 ```python
 def inchikey(smiles: str) -> str | None:
@@ -709,7 +837,12 @@ way every time; Module 7 makes it part of standardisation.
 
 Canonical SMILES found the same duplicates as InChIKeys above. So why not use them as the identity?
 Because "canonical" means canonical for one program. Open Babel, the other widely used open-source
-toolkit, has its own canonical SMILES. Read the first 1,000 molecules of the library with both:
+toolkit, has its own canonical SMILES. Read the first 1,000 molecules of the library with both.
+
+`pybel` is Open Babel's Python interface: `pybel.readstring("smi", smiles)` reads a SMILES and
+`.write("can")` writes Open Babel's canonical SMILES. For each molecule the code records four
+`True`/`False` answers, and adding up a column of them counts the `True`s. The last two lines print
+the two SMILES of the last molecule in the loop:
 
 ```python
 pybel.ob.obErrorLog.SetOutputLevel(0)  # quiet: we compare the results ourselves
@@ -759,18 +892,30 @@ improved. The InChIKeys are the same whichever SMILES they are made from.
 
 InChI avoids the problem by design: there is one InChI algorithm, maintained by IUPAC and the InChI
 Trust, and toolkits call the same InChI library rather than writing their own. Open Babel can write
-InChIs and InChIKeys too, when it is built with that library (check with
-`"inchikey" in pybel.outformats`; the pip package for Linux includes it, the one for Windows, at
-the time of writing, does not). Store the toolkit's canonical SMILES to rebuild the molecule, and
-the InChIKey to identify it.
+InChIs and InChIKeys too, when it is built with that library. You can check with
+`"inchikey" in pybel.outformats`, which gives `True` or `False`. The package installed with `pip`
+(Python's package installer) includes it on Linux, and so in Colab; the one for Windows, at the time
+of writing, does not. Store the toolkit's canonical SMILES to rebuild the molecule, and the InChIKey
+to identify it.
 
 ## 7. Did the file arrive unchanged?
 
 Files are copied, downloaded, uploaded and synchronised, and somewhere along the way one can be cut
 short or changed. A truncated SDF still opens (section 3 lost only one record), and a single changed
-byte can turn chlorine into bromine. A **checksum** catches both. SHA-256 turns a file's bytes into
-a 64-character fingerprint; change any byte and the fingerprint changes completely. Whoever sends a
-file publishes its checksum, and whoever receives it computes the checksum again and compares:
+byte can turn chlorine into bromine. A **checksum** catches both. **SHA-256** is a standard
+recipe (a hash, like the InChIKey in Module 2) that turns a file's bytes into a 64-character code
+of digits and the letters a to f. Change any byte and the code changes completely. Whoever sends a
+file publishes its checksum, and whoever receives it computes the checksum again and compares.
+
+The code has three functions:
+
+- `sha256` reads the file a chunk at a time and feeds each chunk to `hashlib`. The line
+  `while chunk := handle.read(chunk_size):` reads the next chunk into `chunk` and keeps going as
+  long as it is not empty; the `:=` gives a name to a value in the middle of a line;
+- `write_checksums` writes a **manifest**: a small text file listing each file's checksum, two
+  spaces, and its name;
+- `verify` reads the manifest back, computes each file's checksum again, and returns the names of
+  the files that no longer match:
 
 ```python
 def sha256(path: Path, chunk_size: int = CHECKSUM_CHUNK) -> str:
@@ -828,10 +973,23 @@ changed files: ['library.smi']
 ```
 
 The file is the same size and still a valid SMILES file, so only the checksum notices. The
-manifest format is the one the `sha256sum` command reads (`sha256sum -c SHA256SUMS`), so the
-receiver does not need Python to check it. When you download data from a repository that publishes
-checksums, compare them before you use the files; Module 13 builds manifests like this one into
-versioning.
+manifest format is the one the `sha256sum` command reads, so the receiver does not need Python to
+check it. You do not need this for the lesson, but if you want to try it: `sha256sum` is a terminal
+command on Linux. In Colab, run it in a new code cell, where a line starting with `!` is sent to
+the terminal instead of to Python:
+
+```bash
+!cd work && sha256sum -c SHA256SUMS
+```
+
+It prints each file's name followed by `OK` or `FAILED` (here `library.smi: FAILED`, because we just
+changed it) and a warning line counting the failures. On macOS, type
+`shasum -a 256 -c SHA256SUMS` in Terminal, in the `work` folder, without the `!`. Windows
+PowerShell has no `sha256sum`.
+
+When you download data from a data repository (a website that keeps published datasets, such as
+Zenodo) that publishes checksums, compare them before you use the files; Module 13 builds manifests
+like this one into versioning.
 
 ## 8. Choosing a format
 

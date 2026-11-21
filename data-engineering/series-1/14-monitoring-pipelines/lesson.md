@@ -13,22 +13,50 @@ every run: **did it run, did it do the right thing, and is the data still what w
 
 By the end of this module you will be able to:
 
-- write structured logs (one JSON event per line) with Python's `logging`, and keep secrets out of them;
-- keep a run history in DuckDB, one row per run and per step, with an injected clock;
-- reconcile counts (in = out + quarantined + duplicates) and catch a silent data-loss bug with it;
-- compute throughput, quarantine rate, error rate and freshness for each run;
-- measure drift in molecular properties with the population stability index and the
-  Kolmogorov–Smirnov statistic;
-- turn thresholds into alerts that fire once, resolve once, and do not drown you.
+- write a log (the job's own diary of what it did) as one line of JSON per event, so a program can
+  read it back, and keep passwords out of it;
+- keep a run history: a small database table with one row for every run and every step;
+- check that every record is accounted for (records in = records out + rejected + duplicates), and
+  use that check to catch a bug that quietly loses a third of the data;
+- work out, for each run, how fast it was, how many records it rejected, and how old the newest
+  data is;
+- tell when a new batch of molecules looks different from the usual ones (drift in molecular
+  weight and logP);
+- turn these checks into alerts that tell a person once when something goes wrong, and once when
+  it is fixed.
 
-Everything here runs on any laptop: you need Python, RDKit, NumPy, pandas, pyarrow, DuckDB and
-matplotlib. The molecules come from the course's teaching library, `chemlib`.
+This module uses what earlier modules built: the validation rules and the faults that `chemlib`
+adds ([Module 6](../06-validating-molecules/)), InChIKeys for finding duplicates
+([Module 3](../03-files-and-identity/)), Parquet files and DuckDB
+([Module 8](../08-larger-than-memory/)), and logging ([Module 1](../01-graphs-and-matrices/)).
+
+The lesson uses these Python packages (code other people wrote, which you load with `import`):
+
+- **RDKit**, for reading molecules and calculating their properties;
+- **NumPy** and **pandas**, for arrays of numbers and for tables;
+- **pyarrow**, which pandas uses to write **Parquet** files (a compact file format for tables);
+- **DuckDB**, a small database that lives in one file on your computer and answers questions
+  written in SQL, the standard language for asking a database for data;
+- **matplotlib**, for drawing figures.
+
+The molecules come from the course's teaching library, `chemlib`, which makes realistic
+drug-like molecules on demand. Everything here runs in Colab or on any laptop.
+
+A few words come up again and again. A **run** is one execution of the pipeline, start to finish:
+here, one night's load. A **step** is one stage inside a run (validate, deduplicate and so on).
+To **quarantine** a record is to set it aside, with the reason, instead of deleting it, so a person
+can look at it later. **JSON** is a way of writing data as text that both people and programs can
+read: `{"step": "validate", "rows_in": 1510}` is one JSON object, a set of named fields.
 
 ## Setup
 
 Everything this lesson needs is imported and set here, so the settings can be changed in one place.
 Pipeline steps report with `log`; `print` is kept for showing you results; Module 1 explains why,
-and Section 2 below takes logging further.
+and Section 2 below takes logging further. Besides the packages above, the block imports some parts
+of Python itself: `json` (writes and reads JSON), `re` (regular expressions, short patterns for
+finding text, used in Section 2), `Counter` (counts things), `datetime` and `timedelta` (a date and
+time, and a length of time), `Path` (file paths) and `NamedTuple` (a small record type, used in
+Section 7).
 
 ```python
 import json
@@ -98,10 +126,14 @@ WORK.mkdir(exist_ok=True)
 
 Our example is a nightly load from a compound supplier: read the file, validate each record, remove
 duplicates, add the vendor's details, calculate two descriptors and publish the result as Parquet.
-Tonight's file holds 1,500 molecules, with faults added at a known rate of 4% (as in Module 6);
-the duplicates arrive as extra rows, so the file has 1,510 records. First, the validation rule
-every record goes through. `Counter`, imported in the Setup block, tallies the reasons: it counts
-and sorts in one step.
+Tonight's file holds 1,500 molecules, with faults added at a known rate of 4% (as in
+[Module 6](../06-validating-molecules/)); the duplicates arrive as extra rows, so the file has
+1,510 records. First, the validation rule every record goes through: the `check` function below
+reads a SMILES and returns the molecule and an empty reason, or no molecule and the reason it was
+rejected. `Counter`, imported in the Setup block, tallies the reasons: it counts and sorts in one
+step. In the last line, `{reason:25}` prints the reason padded to 25 characters and `{count:>5}`
+prints the count right-aligned in 5, so the numbers line up in a column; `reason or "accepted"`
+uses the word "accepted" when the reason is empty.
 
 ```python
 def check(smiles):
@@ -157,19 +189,36 @@ reasons to log rather than print: every line has a level, so a job can run quiet
 and verbosely when debugging, and handlers send the same line to the screen, a file and a log
 service at once. Every module since has used the plain logger from its Setup block, which writes a
 level and a message. A nightly job needs more from its logs than that, and this section builds it
-on the same `logging` module: a formatter of our own, two handlers and a named logger for the
-pipeline.
+on the same `logging` module from three parts:
+
+- a **logger**, the object you call (`pipeline_log.info(...)`) to write a line;
+- **handlers**, which decide where each line goes: one to the screen, one to a file;
+- a **formatter**, which decides what each line looks like. We write our own, which turns each line
+  into JSON.
 
 A free-text line such as `validated 1500 rows, 50 bad` is easy to write and hard to use:
-to count bad rows across a month of runs, someone has to write a regular expression for it. A
-**structured log** writes one JSON object per line, with the same fields every time: the time, the
-level, the event, the run, the step and its counts. Log services (Elasticsearch, Loki, CloudWatch,
-Datadog) index those fields; so can DuckDB, as we will see.
+to count bad rows across a month of runs, someone has to write a pattern that picks the number out
+of the sentence. A **structured log** writes one JSON object per line, with the same fields every
+time: the time, the level, the event, the run, the step and its counts. Log services (programs that
+collect the logs of many machines in one place and let you search them, such as Elasticsearch,
+Loki, CloudWatch and Datadog) index those fields; so can DuckDB, as we will see.
 
 Two more things go into the formatter. Its time comes from a **clock object we pass in** (an
 injected clock), not from the computer's clock, so a test or a lesson can set the time and get the
-same output on every run. And it **removes secrets**: connection strings with passwords, API
-tokens. Logs are copied, shipped and read by many people; a password written into one has leaked.
+same output on every run. And it **removes secrets**. A connection string, the address a program
+uses to reach a database, often holds a user name and password
+(`postgresql://loader:s3cret@chemdb...` below); an API token is a password-like key that a program
+sends to a web service. Logs are copied, shipped and read by many people; a password written into
+one has leaked.
+
+The code below has four pieces. `Clock` is a class (a recipe for an object that keeps its own data,
+here the time, and has its own functions, called methods). `redact` finds secrets with two
+**regular expressions**, patterns for matching text: the first matches the `:password@` part of an
+address, the second matches `password=`, `token=` or `api_key=` and the value after it; each match
+is replaced with `***`. `JsonFormatter` builds on `logging`'s own formatter and changes only one
+method, `format`, which turns a log record into a JSON line. `make_logger` puts them together. A
+line can carry extra fields: we pass them as `extra={"fields": {...}}` when we log, and the
+formatter adds them to the JSON.
 
 ```python
 class Clock:
@@ -269,7 +318,9 @@ pipeline_log.warning("records quarantined", extra={"fields": fields})
 The password in the connection string never reached the screen or the file, and the DEBUG line
 was dropped. Because every line is JSON, the log file is a table. DuckDB reads it directly, which
 is how you would answer "how many warnings did last night's run write?" without a regular
-expression:
+expression. The question is written in SQL: `read_json_auto(...)` reads the file as a table,
+`GROUP BY level` puts the lines with the same level together, and `count(*)` counts each group.
+`.df()` hands the answer back as a pandas table:
 
 ```python
 print(
@@ -290,8 +341,14 @@ WARNING       1
 Logs are a stream of events. To compare runs (was last night's run slower, did it quarantine more
 than usual?) we also keep a **run history**: a table with one row per run and one per step, with
 start and finish times and the counts in and out. Here it lives in DuckDB; a team that shares it
-would put the same two tables in PostgreSQL (Module 4), and workflow tools such as Airflow, Dagster
-and Prefect keep a table much like it for every task they run.
+would put the same two tables in PostgreSQL, a database server many people can use at once (Module
+4), and workflow tools (programs that start pipelines on a timetable and keep track of them, such
+as Airflow, Dagster and Prefect) keep a table much like it for every task they run.
+
+The code connects to a DuckDB file and creates three empty tables with SQL's `CREATE TABLE`: `runs`,
+`steps`, and `quarantine` for the rejected records. Each column is given a type: `VARCHAR` is text,
+`INTEGER` a whole number, `TIMESTAMP` a date and time. `PRIMARY KEY` means no two rows may have the
+same `run_id`.
 
 ```python
 HISTORY_DB.unlink(missing_ok=True)  # start each run of the lesson from an empty history
@@ -314,6 +371,22 @@ Each step is a function that takes a table and returns three things: the rows it
 it quarantines (with a reason), and how many duplicates it removed. Keeping that shape for every
 step is what makes the counts checkable later. Validation keeps each RDKit molecule in a `mol`
 column, so later steps do not read the SMILES again (reading is a large share of the time).
+
+The four steps:
+
+- `validate` runs `check` on every record. `[mol for mol, _ in checked]` is a list comprehension,
+  a one-line loop that builds a list: it takes the molecule out of each (molecule, reason) pair, and
+  `_` is the usual name for the part we do not need. `bad` is True for rejected rows, and `~bad`
+  means "not bad".
+- `deduplicate` keeps the first record of each InChIKey
+  ([Module 3](../03-files-and-identity/)).
+- `enrich` adds each vendor's country and lead time from a small table, `VENDORS`. It uses pandas'
+  `merge`, which **joins** two tables: for every row on the left (our compounds) it finds the row on
+  the right (the vendors) with the same value in the shared column, here `vendor`, and adds that
+  row's columns, much like VLOOKUP in a spreadsheet. With `how="left"`, every compound is kept even
+  when its vendor is not in the table; `indicator=True` adds a column, `_merge`, that says
+  `left_only` for those, so we can quarantine them.
+- `describe` adds molecular weight and logP, rounded to two decimals.
 
 ```python
 NO_ROWS = pd.DataFrame(columns=["id", "smiles", "reason"])
@@ -362,7 +435,10 @@ def describe(df):
 The runner calls the steps in order and records each one. The work is real; the time each step
 takes is simulated (each step's milliseconds per row, `MS_PER_ROW` in the Setup block, give or
 take a seeded random 20%, move the clock on), so the run history comes out the same on every
-computer. In production the clock is the real one and nothing else changes.
+computer. In production the clock is the real one and nothing else changes. `rng` is NumPy's random
+number generator, made from a seed so it gives the same numbers on every run. In the SQL, each `?`
+is a placeholder that DuckDB fills, in order, from the list of values after it; this is safer than
+pasting values into the text of the query.
 
 ```python
 def run_step(run_id, step_no, name, func, df, rng):
@@ -396,7 +472,8 @@ def run_step(run_id, step_no, name, func, df, rng):
 ```
 
 DuckDB's `FROM quarantined` reads the pandas table of that name straight from Python. Now one run,
-with the log on screen showing warnings only, so the per-step lines go to the file:
+with the log on screen showing warnings only, so the per-step lines go to the file.
+`enumerate(steps, start=1)` numbers the steps 1, 2, 3, 4 as the loop goes through them:
 
 ```python
 STEPS = [("validate", validate), ("deduplicate", deduplicate), ("enrich", enrich),
@@ -434,7 +511,14 @@ duplicate. So for each step, **in = out + quarantined + duplicates**, and each s
 the previous step's output. This is **reconciliation**, the oldest check in data engineering
 (accountants call it balancing the books), and it is cheap: it needs only the counts we already
 record. The check below fails loudly, with an exception, rather than writing a warning nobody
-reads:
+reads.
+
+`class ReconciliationError(Exception)` makes a new kind of error of our own, so that whoever calls
+`reconcile` can catch exactly this problem with `except ReconciliationError`. In the SQL,
+`rows_in - rows_out - quarantined - duplicates` is the number of rows that went missing (it should
+be 0), and `lag(rows_out) OVER (ORDER BY step_no)` takes `rows_out` from the step before, so we can
+check that each step received what the last one passed on. `itertuples()` goes through the rows of
+a pandas table one at a time:
 
 ```python
 class ReconciliationError(Exception):
@@ -472,8 +556,9 @@ INFO run-0001 reconciles
 ```
 
 Now the bug it exists for. Someone refreshes the vendor table from a spreadsheet that has not yet
-caught up with Vendor C, and rewrites the enrichment step with pandas' `merge`, whose default is an
-**inner join**: rows with no matching vendor simply disappear. Nothing crashes, the step "succeeds",
+caught up with Vendor C, and rewrites the enrichment step with pandas' `merge` but leaves out
+`how="left"`. The default is then an **inner join**, which keeps only the rows found in both
+tables: compounds with no matching vendor simply disappear. Nothing crashes, the step "succeeds",
 and the output looks like a normal, slightly small table.
 
 ```python
@@ -507,7 +592,9 @@ missing vendor the same night.
 
 The runner's last job is to reconcile before publishing, and to close the run's row with its totals
 and status. Publishing only after the check means a run that fails reconciliation writes nothing
-downstream:
+downstream (nothing reaches the people and programs that use its output). `finish_run` fills in
+the run's row with SQL's `UPDATE`, taking the totals from the `steps` table; `df.iloc[0:0]` is the
+table with all its rows removed, so a failed run records 0 rows out:
 
 ```python
 def finish_run(run_id, df, status, message=""):
@@ -550,10 +637,13 @@ A few numbers per run, read from the run history, describe a pipeline's health:
 - **freshness**, the time since the last successful run, against an agreed limit. For a nightly
   job, 26 hours is a common choice: one day plus some slack.
 
-Freshness catches what no per-run check can: the run that never happened. If the scheduler stops,
-there is no failed run to alert on, only data quietly growing old.
+Freshness catches what no per-run check can: the run that never happened. If the scheduler (the
+program that starts the job every night) stops, there is no failed run to alert on, only data
+quietly growing old.
 
-The limit is `FRESHNESS_LIMIT` in the Setup block.
+The limit is `FRESHNESS_LIMIT` in the Setup block. In the SQL below, `epoch(finished - started)` is
+the length of the run in seconds, and `<>` means "not equal to". In the last line,
+`{...:.1f}` prints the number with one decimal place.
 
 ```python
 def freshness(now):
@@ -591,14 +681,24 @@ A run can reconcile perfectly and still deliver the wrong data. Suppose a suppli
 sorted by structure and only one page of it was sent: every molecule is valid, the counts add up,
 and every molecule carries a phenyl and a fluorophenyl group. Models trained on the old data, and
 chemists choosing compounds from it, would be misled. Watching the **distribution** of a few
-properties catches this.
+properties catches this. A change in the distribution from one batch to the next is called
+**drift**. We compare each new batch with a **reference**: a batch we have checked and trust, here
+the output of the first run.
 
 The **population stability index** (PSI) compares two distributions. Cut the reference into ten
 bins with equal numbers of molecules (its deciles), count the share of the new batch in each bin,
 and add up `(new - ref) × ln(new / ref)` over the bins. Identical distributions give 0; the bigger
-the shift, the bigger the number. The **Kolmogorov–Smirnov statistic** is the largest vertical gap
-between the two cumulative distributions, from 0 (the same) to 1 (no overlap). Both are a few lines
-of NumPy:
+the shift, the bigger the number. The **Kolmogorov–Smirnov statistic** (KS) uses the cumulative
+distribution: for each value of, say, molecular weight, the share of molecules at or below it,
+which rises from 0 to 1. KS is the largest vertical gap between the two batches' cumulative
+distributions, from 0 (the same) to 1 (no overlap). Both are a few lines of NumPy: `np.quantile`
+finds the bin edges, `np.histogram` counts the molecules in each bin, and `np.searchsorted` counts,
+for each value, how many molecules lie at or below it.
+
+The batch for the one-page example comes from `chemlib.stream`, which hands out a library a batch
+at a time (a generator, [Module 8](../08-larger-than-memory/)); `next(...)` takes its first batch.
+The `print` lines use the same padding as in Section 1, and `:8.3f` means 8 characters wide with 3
+decimals:
 
 ```python
 def psi(reference, new, bins=PSI_BINS):
@@ -650,15 +750,18 @@ The usual reading of PSI comes from credit scoring: **below 0.1, no real change;
 moderate shift worth a look; above 0.25, a significant shift**. These are rules of thumb, not
 statistics: PSI grows with the number of bins and, for small batches, with sampling noise, so check
 what your own ordinary batches score (here, about 0.01) before trusting any threshold. The KS
-statistic comes with a p-value (`scipy.stats.ks_2samp`), but with thousands of molecules almost any
-difference is "significant"; the size of the gap is the more useful number. Molecular weight and
-logP are a start; heavy-atom count, ring count, fraction of sp3 carbons and the share of each
-scaffold are other common choices.
+statistic comes with a p-value (the chance of a gap this large if nothing had changed; SciPy's
+`scipy.stats.ks_2samp` gives it), but with thousands of molecules almost any difference is
+"significant"; the size of the gap is the more useful number. Molecular weight and logP are a
+start; heavy-atom count, ring count, fraction of sp3 carbons and the share of each scaffold are
+other common choices.
 
 ## 7. Alerts that people will read
 
-A check that nobody hears about is not monitoring. An **alert rule** pairs a metric with a
-threshold and a severity. The common practice, from site reliability engineering, is to keep two
+A check that nobody hears about is not monitoring. An **alert rule** pairs a metric (one of the
+numbers above, such as the quarantine rate) with a threshold (the value above which something is
+wrong) and a severity (how urgent it is). The common practice, from site reliability engineering
+(the name Google gave to the job of keeping large computer systems running), is to keep two
 kinds: a **page**, which wakes someone because the data is wrong or missing now, and a **ticket**,
 which can wait for working hours. The main risk is **alert fatigue**: a rule that fires every night
 for something harmless trains people to ignore all of them. So alert on symptoms that need a person
@@ -666,6 +769,15 @@ for something harmless trains people to ignore all of them. So alert on symptoms
 rule **starts** firing and when it **resolves**, not on every check in between.
 
 The thresholds come from the Setup block, so the rules and the checks above share one value each.
+
+Each rule is a **named tuple** ([Module 6](../06-validating-molecules/)): a small record with named
+fields, here `name`, `metric`, `threshold` and `severity`. The `: str` and `: float` after each
+field are type hints, notes that say what kind of value the field holds. In the rule names,
+`{QUARANTINE_LIMIT:.0%}` prints 0.10 as "10%".
+
+The `Alerter` class remembers which rules are firing now, in a set (`self.firing`, a collection of
+names with no repeats). Each time it gets new metrics it checks every rule, and it sends a message
+only when a rule changes state: from quiet to firing, or from firing back to quiet ("resolved").
 
 ```python
 class Rule(NamedTuple):
@@ -720,10 +832,13 @@ class Alerter:
         pipeline_log.log(level, "alert", extra={"fields": fields})
 ```
 
-In a team the `notify` method posts to a chat channel (Slack and Microsoft Teams both accept a JSON
-message at a webhook address) or to an on-call service (PagerDuty, Opsgenie) that pages whoever is
-on the rota. The webhook address is a secret too: it belongs in an environment variable, never in
-the code or the logs.
+In a team the `notify` method posts to a chat channel or to an on-call service. Slack and Microsoft
+Teams both give you a **webhook address**: a web address that, when a program sends a JSON message
+to it, posts that message in a chat channel. On-call services (PagerDuty, Opsgenie) phone or message
+whoever is on the rota that week. The webhook address is a secret too, since anyone who has it can
+post to your channel: it belongs in an environment variable (a named setting kept by the operating
+system outside your code, [Module 10](../10-pipelines-that-survive-failure/)), never in the code or
+the logs.
 
 ## 8. A fortnight of runs
 
@@ -733,6 +848,13 @@ go wrong, on purpose: on **night 8** the inner-join bug from Section 4 is deploy
 11** the supplier sends the one-page batch from Section 6. Every morning at 09:00 a separate check
 looks at freshness, as a scheduler would. Only warnings and errors are printed; the file has
 everything.
+
+The loop below is long, but each night does the same five things: set the clock to 02:00 on that
+night, make the night's file, run the pipeline and publish (`run_and_publish`, Section 4), measure
+drift against the reference and store it in a new `drift` table, and pass the night's metrics to
+the alerter; then set the clock to 09:00 and pass it the freshness. `f"run-{night:04d}"` writes the
+night as four digits, so night 8 becomes `run-0008`, and `*drift` passes the four drift numbers as
+four separate values:
 
 ```python
 for table in ("runs", "steps", "quarantine"):  # a fresh history for the fortnight
@@ -780,7 +902,9 @@ for night in range(1, NIGHTS + 1):
 Night 8 paged twice: the run failed, and by the morning check the data was 31 hours old. Both
 resolved after night 9, and each alert was sent once, not every night. Night 11's batch passed
 every validation rule and reconciled, and only the drift rules caught it. The run history, from
-DuckDB:
+DuckDB. `LEFT JOIN drift d USING (run_id)` is SQL's version of the left join from Section 3: it
+adds each run's drift scores and keeps the failed run, which has none (pandas shows the missing
+values as `NaN`, "not a number"):
 
 ```python
 history = db.sql("""
@@ -819,7 +943,11 @@ every night, so the 10% rule never fired: a threshold set above the normal level
 quiet until something changes.
 
 A small dashboard drawn from the same tables puts the fortnight on one page: rows in and out, the
-quarantine rate, and the drift scores against the two PSI thresholds.
+quarantine rate, and the drift scores against the two PSI thresholds. The code is matplotlib
+drawing three panels one above the other; you do not need to follow every line of it, only to see
+that it reads nothing but the `runs` and `drift` tables. The drift panel uses a scale that is
+ordinary below 0.1 and logarithmic above (`symlog`), so the small and the very large scores both
+fit. The figure is saved to a file, shown under the code.
 
 ```python
 def dashboard(db, path):
@@ -869,8 +997,10 @@ db.close()
 
 ![A fortnight of runs: rows in and published per night (night 8 failed and published nothing), the quarantine rate (steady, below its 10% threshold), and PSI for molecular weight and logP (night 11 far above 0.25)](figures/run-dashboard.svg)
 
-Grafana, Metabase or Superset would draw the same panels live from the same run-history tables;
-the point is that the tables exist and every run writes to them.
+Dashboard programs such as Grafana, Metabase or Superset would draw the same panels live, in a web
+page, from the same run-history tables; the point is that the tables exist and every run writes to
+them. The last line, `db.close()`, closes the run history; to use it again in a new cell, reconnect
+with `db = duckdb.connect(str(HISTORY_DB))`.
 
 ## Try it yourself
 

@@ -4,42 +4,69 @@ summary: Stream molecules in batches, write a partitioned Parquet dataset and qu
 requires: pandas, pyarrow, rdkit, numpy, psutil, duckdb, tqdm
 ---
 
-Screening libraries are large and getting larger. Make-on-demand catalogues already list tens of
-billions of purchasable molecules (Irwin et al., 2020, in the further reading), and even an
-in-house collection with fingerprints and descriptors soon outgrows a laptop's memory. The first
-version of most pipelines reads the whole file into a pandas table, which works on a test file
-and then fails on the real one, often hours in, with the machine swapping or the process killed.
-Data engineers avoid this by never holding the whole library at once: they stream it in batches,
-keep each record and each column in the smallest form that holds it, store it in a columnar format
-that can be read in pieces, and query it with an engine that reads only what each question needs.
+Screening libraries are large and getting larger. Make-on-demand catalogues (lists of molecules a
+supplier has never made but can synthesise to order) already offer tens of billions of molecules
+(Irwin et al., 2020, in the further reading), and even an in-house collection with fingerprints and
+descriptors soon outgrows a laptop's **memory**. Memory here means the computer's working memory
+(RAM): the fast, limited space a program holds its data in while it runs, usually 8 to 32 GB on a
+laptop. The disk, where files are kept, is far larger but much slower.
+
+The first version of most pipelines reads the whole file into a pandas table at once. That works on
+a small test file and then fails on the real one, often hours in: the computer runs out of memory,
+starts moving memory to the disk to make room (called **swapping**, which makes everything crawl),
+and in the end the operating system stops the program. Data engineers avoid this by never holding
+the whole library at once. They **stream** it: read a **batch** of a few thousand molecules,
+process it, write the results to a file, forget the batch and read the next. They also keep each
+column in the smallest form that holds it, store the results in a file format that can be read in
+pieces, and ask questions of that file with a tool that reads only the parts each question needs.
 
 By the end of this module you will be able to:
 
-- measure what a library costs in memory as a pandas table, an Arrow table, RDKit molecules and
-  fingerprints, compared with the file on disk;
-- measure memory before optimising, with `tracemalloc` and `DataFrame.memory_usage(deep=True)`, and
-  choose a record container (dict, named tuple, dataclass with slots) by what it costs;
-- stream a library through a processing step in batches, with memory that stays flat, using
-  generators and `itertools` to batch, join and group streams;
-- count and summarise a stream as it passes with `Counter`, `defaultdict` and a bounded `deque`,
-  without holding the batches;
-- show a long run's progress the right way for its audience: a tqdm bar for a person watching,
-  log lines at a steady pace for an unattended job;
-- shrink a table with compact types: smaller NumPy integers and floats (checked against the data),
-  pandas categories and Parquet dictionary encoding;
-- write a partitioned Parquet dataset with an explicit schema, row groups and compression;
-- read back only the columns and rows a question needs (column pruning and predicate pushdown);
-- query the whole dataset with DuckDB without loading it.
+- measure how much memory a library takes as a table, as RDKit molecules and as fingerprints, and
+  compare it with the size of the file on disk;
+- find out which line of your code uses the memory, before trying to save any, and choose how to
+  hold each record (as a dictionary, a named tuple or a dataclass) by what it costs;
+- process a library in batches, so the memory used stays the same however large the library is;
+- count and summarise the molecules as they pass, without keeping them;
+- show how far a long run has got: a progress bar for a person watching, a line in the log every
+  so often for a job nobody is watching;
+- make a table smaller by storing each column in a smaller type, checked against the data;
+- write a library as a folder of Parquet files, split by vendor, and read back only the columns
+  and rows a question needs;
+- ask questions of the whole folder with DuckDB, without loading it into memory.
 
-The teaching library from `chemlib` (as in the earlier modules) can make 1,733,400
-molecules. We use a few hundred thousand of them for plain data and a few tens of thousands for
-RDKit work, so the lesson runs in about a minute, and say at each step how the same code scales.
+This module builds on earlier ones: Parquet files and generators (functions that hand out records
+one at a time) from [Module 3](../03-files-and-identity/), and the damaged molecules made with
+`chemlib.add_defects` from [Module 6](../06-validating-molecules/). `chemlib` is the course's own
+small helper file that makes a made-up but realistic teaching library of molecules, with ids,
+SMILES, vendors, prices and stock. It can make 1,733,400 molecules. We use a few hundred thousand
+of them for plain data and a few tens of thousands for RDKit work, so the lesson runs in about a
+minute, and we say at each step how the same code scales.
+
+The lesson uses these packages (each is introduced again where it is first used):
+
+- **pandas**, for tables, and **NumPy**, for arrays of numbers, as in the earlier modules;
+- **PyArrow**, the Python package of **Apache Arrow**, a way of holding tables in memory column by
+  column; it also reads and writes Parquet files;
+- **RDKit**, for molecules, as before;
+- **psutil**, which reports how much memory a running program is using;
+- **DuckDB**, a small database that runs inside Python and can answer questions about Parquet
+  files directly;
+- **tqdm**, which draws progress bars.
+
+We also use several parts of Python's **standard library** (the modules that come with Python
+itself, such as `collections`, `itertools` and `tracemalloc`); each is explained where it is used.
 
 ## Setup
 
 Everything this lesson needs is imported and set here, so the settings can be changed in one
 place. Pipeline steps report with `log`; `print` is kept for showing you results; Module 1 explains
-why.
+why. The block is long because the lesson covers a lot of ground: you do not need to read every
+setting now, as each section says which ones it uses.
+
+The lesson writes its files into a folder called `work`, next to the notebook (in Colab, in the
+Files panel on the left). In the numbers, `20_000` is Python's way of writing 20,000: the
+underscores are ignored and only make the number easier to read.
 
 ```python
 import csv
@@ -117,14 +144,28 @@ print(f"the generator can make {chemlib.size():,} molecules; we stream {N_MOLECU
 the generator can make 1,733,400 molecules; we stream 300,000 in batches of 25,000
 ```
 
+The last line uses an f-string **format spec**: in `{N_MOLECULES:,}`, the part after the colon says
+how to print the value, and `,` means "with commas between thousands". We use several of these:
+`{x:.1f}` prints a number with one decimal place, `{x:6.1f}` does the same in a space six
+characters wide (so columns line up), `{name:22}` pads text to 22 characters, and `{x:.0%}` prints a
+fraction as a percentage.
+
 ## 1. Why loading everything fails
 
 ### What one molecule costs
 
-Take a sample of 20,000 molecules and measure the same data five ways: as a CSV file, as a
-compressed Parquet file, as an Apache Arrow table in memory, and as a pandas table in memory with
-its text stored two ways. pandas reports its own size with `memory_usage(deep=True)` (deep, so the
-text is counted too); Arrow reports `nbytes`:
+Memory and file sizes are counted in **bytes** (one byte is enough to store one letter of plain
+text); a kilobyte (kB) is a thousand bytes, a megabyte (MB) a million and a gigabyte (GB) a billion.
+Take a sample of 20,000 molecules and measure the same data five ways:
+
+- as a **CSV** file, plain text with commas between the values;
+- as a **Parquet** file (Module 3), compressed with **zstd**, a common compression method like the
+  one in a zip file;
+- as an Arrow table in memory;
+- as a pandas table in memory, with its text stored two ways (explained after the output).
+
+pandas reports its own size with `memory_usage(deep=True)` (deep, so the text is counted too);
+Arrow reports `nbytes`. `pa.Table.from_pandas` turns a pandas table into an Arrow one:
 
 ```python
 sample = chemlib.library(SAMPLE_SIZE, seed=SEED)
@@ -155,16 +196,19 @@ Parquet is the smallest by far: each column is compressed on its own, and a colu
 values compresses well. In memory, the cost depends on how the text is held. Arrow stores all the
 SMILES of a column one after another in a single buffer, with an offset for each, so its table is
 close to the size of the raw text; pandas 3 stores text columns this way by default. Older pandas
-versions, and any column of dtype `object`, hold every SMILES and every id as a separate Python
-object, each with a header of around 50 bytes before its first character and a pointer to it in
-the column: more than twice the size for the same molecules.
+versions, and any column whose **dtype** (the column's data type) is `object`, hold every SMILES and
+every id as a separate Python object, each with a header of around 50 bytes before its first
+character and a pointer to it in the column: more than twice the size for the same molecules. The
+`astype({...: object})` line above made such a copy, so we could measure it.
 
 ### Molecules and fingerprints cost more
 
 Most pipelines do not stop at text: they parse each SMILES into an RDKit molecule and compute a
-fingerprint. RDKit molecules live in C++ memory, which Python's own tools cannot see, so we
-measure the whole process's memory (its *resident set size*) with `psutil`, before and after
-parsing the sample. The number depends on the machine and the operating system:
+fingerprint. RDKit is written in another language, C++, and keeps its molecules in memory that
+Python's own tools cannot see. So we ask the operating system instead. A running program is called
+a **process**, and `psutil` reports how much memory the whole process holds (its *resident set
+size*, or RSS); we read it before and after parsing the sample. The number depends on the machine
+and the operating system, so the output below is an example:
 
 ```python
 process = psutil.Process()
@@ -179,8 +223,11 @@ print(f"{len(molecules):,} RDKit molecules: about {(after - before) / 1e6:.0f} M
 20,000 RDKit molecules: about 643 MB, 32,142 bytes each
 ```
 
-A 2048-bit Morgan fingerprint stored as one byte per bit, the way many machine-learning examples
-do, is 2048 bytes per molecule whatever the molecule; packed eight bits to a byte it is 256:
+A Morgan fingerprint (Module 2) is a row of 2048 bits, each 0 or 1. Stored as one byte per bit
+(NumPy's `uint8` type, a whole number from 0 to 255), the way many machine-learning examples do,
+it is 2048 bytes per molecule whatever the molecule. A byte has room for eight bits, so
+`np.packbits` packs eight of them into each byte, and the fingerprint takes 256 bytes. The second
+half of the block scales the sample's sizes up to the whole teaching library:
 
 ```python
 morgan = rdFingerprintGenerator.GetMorganGenerator(radius=FP_RADIUS, fpSize=FP_BITS)
@@ -206,7 +253,8 @@ The catalogue data of the full teaching library fits in memory comfortably; its 
 already need gigabytes, and the RDKit molecules, at the tens of kilobytes each measured above,
 would need tens of gigabytes. A make-on-demand library of billions of molecules is a thousand
 times larger again, and its catalogue text alone would not fit. No laptop, and no single server,
-holds that in memory; the answer is to stop trying.
+holds that in memory; the answer is to stop trying. The figure shows the two ways of working that
+the rest of the lesson compares:
 
 ![Two ways to process a library: loading it all keeps every batch in memory at once, so memory grows with the library; streaming holds one batch at a time, writes it out and moves on, so memory stays flat](figures/stream-vs-load.svg)
 
@@ -223,14 +271,19 @@ save nothing. There are three tools, for three kinds of memory:
 - the whole process's memory with `psutil`, for memory that Python cannot see, such as RDKit's
   molecules and Arrow's buffers (section 1);
 - Python's built-in **`tracemalloc`**, for the Python objects your own code makes. Once started, it
-  records every block of memory Python allocates and the line of code that asked for it. It reports
-  the memory **current**ly held and the **peak** since it started, and a **snapshot** lists the
-  lines that hold the most.
+  records every block of memory Python sets aside (**allocates**) and the line of code that asked
+  for it. It reports the memory **current**ly held and the **peak** (the most held at any moment)
+  since it started, and a **snapshot** lists the lines that hold the most.
 
 `tracemalloc` slows Python down while it runs, so switch it on around the code you are measuring,
 not for the whole job. Here it watches a common pattern: read 100,000 records as dictionaries, keep
 the cheap ones, and drop the rest. The records' values are made first, outside the measurement, so
-what it sees is the cost of the containers:
+what it sees is the cost of the containers. Three pieces of Python in the block may be new:
+
+- `zip(*columns)` takes several columns and walks along them together, giving one tuple per row;
+  the `*` passes each column to `zip` as a separate argument;
+- `dict(zip(FIELDS, row))` pairs each column name with its value, making one dictionary per record;
+- `del as_dicts` deletes the name `as_dicts`, so Python can free the list it pointed to.
 
 ```python
 source = chemlib.library(N_RECORDS, seed=SEED)
@@ -258,7 +311,8 @@ line 6: 19.2 MB in 200,004 allocations
 line 7: 0.1 MB in 1 allocations
 ```
 
-The snapshot points at line 6: the dictionaries hold almost all the memory. The peak is what
+The snapshot's line numbers count from the top of the code block, so line 6 is the line that builds
+`as_dicts`: the dictionaries hold almost all the memory. The peak is what
 matters for whether a job fits, and here it is set by the moment every record existed at once;
 once the list of all records is deleted, only the cheap ones stay. Had the records been filtered
 as they were read, the peak would never have been reached, which is the idea of section 3.
@@ -267,12 +321,27 @@ molecules), which is why section 1 measured the whole process instead.
 
 ### One record, four containers
 
-A record can be held in several ways, and the choice costs memory for every row. A **dict** keeps a
-hash table of keys per record. A **named tuple** (`collections.namedtuple`) is a tuple whose
-positions also have names, so it stores only the values. A **dataclass** is a small class whose
-fields are listed once; with `slots=True` its instances have a fixed set of fields and no
-per-instance dictionary, and `frozen=True` makes them read-only, like a tuple. The same 100,000
-records in each:
+A record (one molecule's id, SMILES, vendor, price and stock) can be held in several ways, and the
+choice costs memory for every row:
+
+- A **dict** (dictionary) stores each record's keys alongside its values, in a lookup table of its
+  own: `{"id": "ML-00000007", "price_usd": 93.33, ...}`.
+- A **named tuple** (`collections.namedtuple`) is a tuple whose positions also have names, so you
+  can write `record.price_usd` instead of `record[3]`. The names are stored once for all records,
+  so each record holds only its values.
+- A **dataclass** is a small class whose fields are listed once, with the type each should hold
+  (`price_usd: float` is a **type hint**: a note for the reader and for checking tools, which Python
+  itself does not enforce). The line `@dataclass(...)` above the class is a **decorator**: it hands
+  the class to `dataclass`, which writes the usual code for it (creating, printing, comparing).
+  With `slots=True` each record has a fixed set of fields and no dictionary of its own, and
+  `frozen=True` makes records read-only, like a tuple.
+
+The same 100,000 records in each. The helper `bytes_per_record` takes a function that builds one
+record from a row and measures it with `tracemalloc`. The functions are given as **lambdas**:
+`lambda row: dict(zip(FIELDS, row))` is a one-line function without a name, which takes `row` and
+returns a dictionary. `MoleculeRecord(*row)` passes the row's values to the class one by one, and
+`Molecule._make` builds a named tuple from a row. In the type hint, `Callable[[tuple], object]` means
+"a function that takes a tuple and returns anything":
 
 ```python
 Molecule = namedtuple("Molecule", FIELDS)
@@ -331,8 +400,8 @@ slots instead of dicts for all 1,733,400 molecules: 194 MB less
 Molecule(id='ML-00000007', smiles='c1cc(Br)ccc1C(=O)NCc2ccccc2', vendor='Vendor B', price_usd=93.33, stock_mg=40)
 ```
 
-Each figure includes the 8 bytes of the list's pointer to the record, and the values themselves
-are shared, so this is the cost of the container alone. The numbers are for Python 3.11, which this
+Each figure includes the 8 bytes of the list's **pointer** to the record (the memory address the
+list keeps for each item), and the values themselves are shared, so this is the cost of the container alone. The numbers are for Python 3.11, which this
 course uses; other versions differ by a few bytes, but the order is the same. A dataclass with
 slots takes well under half the memory of a dict and, unlike a dict, rejects a misspelt field name
 instead of silently adding a new key. A named tuple is almost as small and can be unpacked like any
@@ -346,9 +415,12 @@ pandas and Arrow do.
 
 ### Generators make data only when asked
 
-A Python **generator** is a function that hands out its results one at a time with `yield`,
-making each only when the loop asks for it. `chemlib.stream(n, batch)` is one: it makes the
-molecules a batch at a time and never holds more than one batch. Creating it does no work at all:
+Streaming rests on one Python feature, met in Module 3. A Python **generator** is a function that
+hands out its results one at a time with `yield` instead of `return`, making each only when the
+loop asks for it. Work that waits until it is needed like this is called **lazy**.
+`chemlib.stream(n, batch)` is a generator: it makes the molecules a batch at a time and never holds
+more than one batch. Creating it does no work at all; `next(batches)` asks it for the next batch,
+which is what a `for` loop does on every turn:
 
 ```python
 batches = chemlib.stream(N_MOLECULES, batch=BATCH)
@@ -374,10 +446,18 @@ time instead of reading the whole file first.
 
 The step we apply is ordinary pandas code that takes one batch and returns it with new columns.
 For hundreds of thousands of rows, cheap string work is enough to show the idea: the number of
-heavy atoms, counted from the SMILES with a regular expression (bracket atoms such as `[nH]`
-count once, `Cl` and `Br` once each), and the number of halogen atoms. A cheap shortcut like this
-is only acceptable once it has been checked against the real calculation, so we compare it with
-RDKit on the 20,000 molecules from section 1:
+heavy atoms and the number of halogen atoms, counted from the SMILES text.
+
+The counting uses a **regular expression**: a small pattern that describes the text to look for,
+which `str.count` then counts in each SMILES. In the pattern `ATOM`, `|` means "or", `[BCNOPSFI]`
+means "any one of these letters", and `\[[^\]]+\]` means "an opening bracket, then anything up to
+the closing bracket", so a bracket atom such as `[nH]` counts once. `Br` and `Cl` are listed before
+the single letters, so they count as one atom each rather than as B and C. The `r` before the quotes
+tells Python to leave the backslashes alone for the pattern to use.
+
+A cheap shortcut like this is only acceptable once it has been checked against the real
+calculation, so we compare it with RDKit on the 20,000 molecules from section 1. The `int16` type
+holds whole numbers up to 32,767, plenty for an atom count (section 4 says more about types):
 
 ```python
 ATOM = r"\[[^\]]+\]|Br|Cl|[BCNOPSFI]|[bcnops]"
@@ -406,7 +486,8 @@ heavy atoms agree with RDKit for all 20,000: True
 The batches a source hands out are not always the ones the next step wants: a supplier sends
 deliveries of different sizes, and a step that writes to a database may want a fixed number of rows
 per call. The standard library's `itertools` works on any iterator, a row or a batch at a time,
-without making a list of everything. Three of its tools do most of the work:
+without making a list of everything. An **iterator** is anything a `for` loop can step through one
+item at a time, such as a generator. Three of its tools do most of the work:
 
 - `islice(iterator, n)` takes the next `n` items and stops, so repeating it cuts a stream into
   batches. (Python 3.12 added `itertools.batched`, which does this in one call; this course runs on
@@ -416,7 +497,15 @@ without making a list of everything. Three of its tools do most of the work:
 - `groupby(iterator, key)` hands out runs of consecutive items with the same key.
 
 Here two deliveries are joined into one stream of rows and cut into batches of 12,000; the second
-delivery starts at molecule 1,000,000, and the third batch spans both:
+delivery starts at molecule 1,000,000, and the third batch spans both. Some notes on the code:
+
+- In `batched`, `while batch := list(islice(iterator, size)):` uses `:=`, which gives a value a
+  name and tests it in one step: take the next `size` items, call them `batch`, and stop when the
+  list is empty.
+- `Iterator[list]` is a type hint: the function hands out lists, one at a time.
+- `(... for n, s in DELIVERIES)`, in round brackets, is a **generator expression**: like a list
+  comprehension, but lazy, so each delivery starts only when it is reached.
+- `itertuples(index=False)` walks through a pandas table one row at a time, each row a named tuple.
 
 ```python
 def batched(items: Iterable, size: int) -> Iterator[list]:
@@ -443,7 +532,9 @@ At no point does more than one delivery batch and one output batch exist. `group
 thing the others do not: the stream must be **sorted by the key**, because it only groups items
 that are next to each other. Our sample is in id order, so grouping it by heavy-atom count gives a
 new group every time the count changes; sorted by heavy atoms first, it gives one group per count,
-and the loop holds one group at a time:
+and the loop holds one group at a time. The `key` is given as a lambda that picks each row's
+heavy-atom count, and `sum(1 for _ in ...)` counts the groups without keeping them (`_` is the
+usual name for a value we do not use):
 
 ```python
 by_id = checked.itertuples(index=False)
@@ -467,7 +558,8 @@ groups in id order: 17,782
 
 In a real job the sorting is done once, when the file is written (DuckDB, in section 6, sorts more
 data than fits in memory by spilling to disk), and every later pass can then group the file as it
-streams: all the conformers of one molecule in an SDF, or all the records with one InChIKey.
+streams: all the conformers of one molecule in an SDF file, or all the records with one InChIKey
+(both from Module 3).
 
 ### Writing batch by batch
 
@@ -479,9 +571,21 @@ text, an id missing) stops the job instead of silently changing the file.
 
 To compare, we also do it the loading-everything way: make all 300,000 rows, then process and
 write them in one go. `tracemalloc` (section 2) cannot measure this fairly, because it sees only
-memory allocated through Python, and Arrow (which holds pandas' text) allocates its own. So a small
-helper watches the whole process's memory from a background thread while a job runs, and reports
-the highest it saw above where it started:
+memory allocated through Python, and Arrow (which holds pandas' text) allocates its own.
+
+So we need a helper that measures the whole process while a job runs. This is the hardest code in
+the module, and you do not need to follow every line to use it: `peak_memory(job, ...)` runs the
+job and returns the most memory the process held above where it started. How it works: a
+**thread** is a second line of work running inside the same program at the same time. While the
+job runs in the main thread, a background thread (`watch`) reads the process's memory every few
+milliseconds and keeps the highest value. Some parts that may be new:
+
+- `*args` collects any extra arguments into a tuple, and `job(*args)` passes them on to the job;
+- `nonlocal peak` lets the inner function `watch` change the `peak` of the function around it;
+- `threading.Event` is a flag one thread sets and another checks; `done.set()` tells the watcher to
+  stop;
+- `try: ... finally: ...` makes sure the `finally` part runs even if the job fails, so the watcher
+  always stops.
 
 ```python
 def peak_memory(job: Callable[..., None], *args: object) -> int:
@@ -507,7 +611,10 @@ def peak_memory(job: Callable[..., None], *args: object) -> int:
 ```
 
 Now the two jobs. Streaming runs first, so any memory it leaves behind with the process counts in
-favour of loading everything, not against it:
+favour of loading everything, not against it. In `stream_to_parquet`, `with ... as writer:` opens
+the writer and closes it (finishing the file) when the indented block ends, even if something goes
+wrong, the same way `with open(...)` closes a file. `pd.concat` joins a list of tables into one. The
+measured memory differs from computer to computer, so the output is an example:
 
 ```python
 SCHEMA = pa.schema(
@@ -567,8 +674,8 @@ same contents: True
 The streaming peak is set by the batch size, not by the number of molecules: stream 1,733,400 or
 a billion, and it stays at about one batch (plus what the writer buffers). Loading everything
 grows in step with the library until it no longer fits. Memory measured this way is noisy,
-because the operating system and Python's allocators keep some freed memory for reuse, so the
-figure below repeats the measurement in a fresh process for each size:
+because the operating system and Python keep some freed memory back for reuse, so the figure below
+repeats the measurement in a fresh process (a new run of Python) for each size:
 
 ![Peak memory against the number of molecules processed, for loading everything and for streaming in batches of 25,000, each measured in a fresh process: one measured run on one laptop, yours will differ](figures/memory-use.svg)
 
@@ -590,7 +697,8 @@ library's `collections`, imported in the Setup block, are made for this:
 Here 100,000 molecules arrive in batches of 10,000, damaged with `chemlib.add_defects` (as in
 Module 6): 2% of each batch, until the last four batches, which come from a supplier's worse export
 at 8%. Elements are counted from the SMILES with a regular expression like `ATOM`'s, one symbol at
-a time:
+a time: `re.findall` returns every match in a string as a list. `zip(..., strict=True)` walks two
+columns together and stops with an error if their lengths differ:
 
 ```python
 ELEMENT = r"Br|Cl|Se|[BCNOPSFI]|[bcnops]"  # aromatic atoms are written in lower case
@@ -666,7 +774,9 @@ library; in a real job it would be written out batch by batch, like the data.
 The batch step can be any function, including real chemistry. Here each batch of 5,000 molecules
 is parsed with RDKit, given a canonical SMILES and two descriptors, and appended to its own
 Parquet file. RDKit is slower than string work, so we stream 20,000 molecules; the memory used is
-again one batch, whatever the total:
+again one batch, whatever the total. This time we do not write the schema out by hand: the writer
+is created when the first batch arrives (while `writer` is still `None`), and takes its schema
+from that batch:
 
 ```python
 def describe(batch: pd.DataFrame) -> pd.DataFrame:
@@ -728,14 +838,17 @@ and ends as:
 streaming: 100%|██████████| 300k/300k [00:02<00:00, 134kmol/s]
 ```
 
-The bar goes to stderr, like log lines, and redraws itself, so the lesson's page cannot show it:
-run the block yourself to see it move. In a notebook, `from tqdm.auto import tqdm` gives a
-graphical bar instead.
+The bar goes to **stderr** (the "error" output, a second output channel that programs use for
+messages, as log lines do) and redraws itself, so the lesson's page cannot show it: run the block
+yourself to see it move. In a notebook, `from tqdm.auto import tqdm` gives a graphical bar instead.
 
-**A job running unattended** (in tmux on a server, Module 10, or on a schedule, Module 15) has
-nobody watching. Its progress belongs in the log, as ordinary lines at a steady pace: every few
-batches, with the count, the share done and, in a real job, the rate. A progress bar written to a
-log file is not a bar any more; it is hundreds of half-lines joined by carriage returns.
+**A job running unattended** (on a server, Module 10, or on a schedule, Module 15) has nobody
+watching. Its progress belongs in the log, as ordinary lines at a steady pace: every few batches,
+with the count, the share done and, in a real job, the rate. A progress bar written to a log file is
+not a bar any more; it is hundreds of half-lines, because the bar redraws itself by jumping back to
+the start of the line, and a file cannot do that. In the code, `k % PROGRESS_EVERY == 0` is true
+every fourth batch (`%` gives the remainder after dividing), and `math.ceil` rounds up, so 12.0
+batches stay 12 and 12.5 would become 13:
 
 ```python
 n_batches = math.ceil(N_MOLECULES / BATCH)
@@ -753,8 +866,8 @@ INFO batch 12/12: 300,000 molecules, 100% done
 ```
 
 One script can serve both. `tqdm(..., disable=None)` shows the bar only when its output is a
-terminal, so the same code draws a bar on your screen and nothing in `work/run.log`, where the
-progress lines take over. And when a loop with a bar also logs (a warning about a bad batch, say),
+**terminal** (a window where you type commands), so the same code draws a bar on your screen and
+nothing in a log file such as `work/run.log`, where the progress lines take over. And when a loop with a bar also logs (a warning about a bad batch, say),
 the log line would land in the middle of the bar; `logging_redirect_tqdm` sends log lines through
 tqdm, which prints them above the bar and redraws it underneath:
 
@@ -778,15 +891,29 @@ for jobs, and never a bar in a log file.
 ## 4. Compact types
 
 Streaming bounds how many rows are in memory; the type of each column sets what each row costs.
-Libraries usually store numbers in the widest types (64-bit integers and floats) and text as text,
-whatever the values, and narrower types often hold the same data in a fraction of the space. The
-rule from section 2 applies: measure first, and check that the narrower type really holds every
-value, because NumPy does not stop you: `np.array([300]).astype(np.uint8)` silently gives 44.
+A number's type says how many bits it is stored in, and so which values it can hold:
+
+| Type | Bytes | Holds |
+|---|---|---|
+| `uint8` | 1 | whole numbers 0 to 255 |
+| `int8` | 1 | whole numbers -128 to 127 |
+| `uint16` | 2 | whole numbers 0 to 65,535 |
+| `int16` | 2 | whole numbers -32,768 to 32,767 |
+| `int64` | 8 | whole numbers up to about 9 billion billion, either sign |
+| `float32` | 4 | decimal numbers, about 7 significant digits |
+| `float64` | 8 | decimal numbers, about 16 significant digits |
+
+(`u` means unsigned: no negative numbers. `uint32` and `int32` take 4 bytes each.) Libraries
+usually store numbers in the widest types (64-bit integers and floats) and text as text, whatever
+the values, and narrower types often hold the same data in a fraction of the space. The rule from
+section 2 applies: measure first, and check that the narrower type really holds every value,
+because NumPy does not stop you: `np.array([300]).astype(np.uint8)` silently gives 44.
 
 ### Smaller numbers, checked
 
 The damaged sample has prices, stock amounts and the two counts from `add_columns`. A helper picks
-the smallest integer type that holds a column's minimum and maximum (pandas'
+the smallest integer type that holds a column's minimum and maximum: it tries the types from the
+smallest up, and `np.iinfo` gives each type's limits (pandas'
 `pd.to_numeric(..., downcast="integer")` does the same job). Prices have two decimal places and are
 under 1,000 dollars, so a 32-bit float, which keeps about seven significant digits, holds them; we
 check that rounding to the cent gives back every price exactly:
@@ -870,7 +997,9 @@ Parquet goes further and dictionary-encodes every column by default: each column
 distinct values once and then small codes, falling back to plain values when there are too many
 different ones. The column metadata shows which encodings were used, and switching dictionary
 encoding off (with compression off too, so only the encoding differs) shows what it saves on the
-vendor column. The sizes are of the column's data in the file, without the file's footer:
+vendor column. The sizes are of the column's data in the file, without the file's **footer** (a
+short summary at the end of every Parquet file: its schema, and where each part of the data is).
+In the f-string, `!s` turns `True` or `False` into text so `:5` can pad it:
 
 ```python
 vendor_table = pa.Table.from_pandas(compact[["vendor"]], preserve_index=False)
@@ -896,10 +1025,13 @@ count, and works best when the file is sorted by that column.
 
 ### One copy of each string: `sys.intern`
 
+*This part is optional: nothing later in the course depends on it.*
+
 Plain Python has a smaller version of the same trick. Text read with the `csv` module gives a new
-string object for every field, so the vendor column read that way is 20,000 objects for three
-names. `sys.intern` returns one shared copy of each distinct string, so equal strings become the
-same object:
+string object for every field (a piece of text is called a **string** in Python), so the vendor
+column read that way is 20,000 objects for three names. `sys.intern` returns one shared copy of
+each distinct string, so equal strings become the same object. `id(v)` gives the identity of the
+object `v` (in practice, where it is in memory), so counting the different ids counts the objects:
 
 ```python
 with SAMPLE_CSV.open(encoding="utf-8", newline="") as handle:
@@ -920,16 +1052,25 @@ encoding do the same job for a whole column.
 
 ### Why Parquet, and why partitions
 
-**Parquet** is the standard file format for analytical data. It stores a table column by column,
-in row groups, and keeps the minimum and maximum of each column in each row group in the file's
-footer. A reader can therefore fetch only the columns it needs (**column pruning**) and skip row
+**Parquet** (Module 3) is the standard file format for data that will be analysed. It stores a
+table column by column, in row groups, and keeps the minimum and maximum of each column in each
+row group in the file's footer. A reader can therefore fetch only the columns it needs (**column pruning**) and skip row
 groups whose minimum and maximum show they cannot match a filter (**predicate pushdown**). Each
 column is compressed separately, and a column of similar values (vendor names, small integers)
 compresses well.
 
 A **partitioned dataset** goes one step further: a folder of Parquet files split by the value of
 a column, one sub-folder per value, named `column=value` (the "Hive" layout, after the system that
-introduced it). A query that asks for one vendor opens only that vendor's folder. Choose a column
+introduced it). Each sub-folder is a **partition**. For our library, split by vendor, it looks like
+this:
+
+```text
+library/
+  vendor=Vendor A/part-0.parquet
+  vendor=Vendor B/part-0.parquet
+  vendor=Vendor C/part-0.parquet
+```
+ A query that asks for one vendor opens only that vendor's folder. Choose a column
 that queries often filter on and that has a modest number of values: vendor, library version or
 scaffold family, not the molecule id.
 
@@ -938,7 +1079,9 @@ scaffold family, not the molecule id.
 `pyarrow.dataset.write_dataset` writes a partitioned dataset from anything that hands out record
 batches, so we can convert the 300,000-row file without loading it: the source is read and written
 a row group at a time. We set the compression and the size of each row group (here 20,000 rows; in
-production, row groups of 100,000 to 1,000,000 rows are common):
+real jobs, row groups of 100,000 to 1,000,000 rows are common). `shutil.rmtree` first deletes the
+folder from any earlier run, and `rglob("*.parquet")` then finds every Parquet file in it, however
+deep:
 
 ```python
 shutil.rmtree(DATASET, ignore_errors=True)
@@ -986,7 +1129,8 @@ print(f"{library.count_rows():,} rows in {len(library.files)} files")
 Now ask a question: small molecules (at most 20 heavy atoms) without halogens from Vendor B, with
 just the three columns we need. The vendor filter selects one folder; the other two are never
 opened. The heavy-atom filter is pushed down to the row groups, and only the columns asked for are
-decoded:
+decoded. The filter is written with `pc.field("name")`, which stands for a column, and `&`, which
+means "and" (each condition needs its own brackets):
 
 ```python
 wanted = (
@@ -1008,7 +1152,9 @@ ML-00000013 c1cc(C(=O)N)ccc1C(=O)NCc2ccccc2           19
 
 Predicate pushdown is easiest to see with a column whose values are in order, like the id (the
 library was streamed in id order). The minimum and maximum id in each row group are in the
-footer, so a filter on an id range can rule out row groups before reading them:
+footer, so a filter on an id range can rule out row groups before reading them. PyArrow calls each
+file of a dataset a **fragment**; the code takes Vendor B's file, prints the id range of each of its
+row groups, and asks which row groups could hold ids from ML-00100000 to ML-00109999:
 
 ```python
 vendor_b = next(f for f in library.get_fragments() if "Vendor%20B" in f.path)
@@ -1035,10 +1181,25 @@ statistics far more useful.
 
 ## 6. Querying the dataset with DuckDB
 
-**DuckDB** is an analytical database that runs inside your Python process, with no server to set
-up (Module 4 used it on a single table). It reads Parquet files directly, and a glob such as
-`work/library/**/*.parquet` with `hive_partitioning = true` makes the whole folder one table,
-vendor column included. A summary per vendor:
+**DuckDB** is a database for analysing data that runs inside your Python process, with nothing to
+install or start separately (Module 4 used it on a single table). It reads Parquet files directly,
+and a **glob** (a file pattern with wildcards) such as `work/library/**/*.parquet`, meaning "every
+file ending in `.parquet`, in any sub-folder of `work/library`", together with
+`hive_partitioning = true`, makes the whole folder one table, vendor column included.
+
+Questions to DuckDB are written in **SQL**, the language databases understand. If you skipped
+Module 4, these are the words used below:
+
+- `SELECT` lists the columns to return, and can compute new ones: `count(*)` counts rows,
+  `avg(price_usd)` averages a column, and `AS molecules` names the result;
+- `FROM` says which table to read;
+- `WHERE` keeps only the rows that pass a test;
+- `GROUP BY vendor` makes one result row per vendor;
+- `ORDER BY` sorts the result, and `LIMIT 5` keeps the first five rows.
+
+The SQL is put inside a Python f-string with triple quotes (`f"""..."""`), so it can run over
+several lines and `{LIBRARY}` can be filled in. `con.sql(...)` runs it, and `.df()` returns the
+answer as a pandas table. A summary per vendor:
 
 ```python
 con = duckdb.connect()
@@ -1085,9 +1246,10 @@ ML-00129279 Vendor A      20.01           26         c1c(OCC)cc(cc1C8CC8)C(=O)NC
 ML-00018058 Vendor B      20.02           26 c1cc(c8cn[nH]c8)c(cc1)Oc2ccc(cc2)C(=O)N(C)S(C)(=O)=O
 ```
 
-`EXPLAIN` shows how DuckDB will run a query, without running it. The vendor filter is applied to
-the file paths (only 1 of the 3 files is scanned) and the heavy-atom filter is applied inside the
-Parquet reader, so row groups that cannot match are skipped:
+`EXPLAIN` shows how DuckDB will run a **query** (a question written in SQL), without running it.
+DuckDB draws its plan in boxes; the code removes the box lines and prints what is inside. The vendor
+filter is applied to the file paths (only 1 of the 3 files is scanned) and the heavy-atom filter is
+applied inside the Parquet reader, so row groups that cannot match are skipped:
 
 ```python
 plan = con.sql(f"""
@@ -1114,11 +1276,12 @@ Scanning Files: 1/3
 
 ### Why this scales
 
-DuckDB, like the data warehouses used in industry, reads only the columns a query names, skips
-partitions and row groups that cannot match, and processes data in vectors of a couple of
-thousand values at a time, spread over all the computer's cores. A `GROUP BY` or `ORDER BY` that
-needs more memory than it is allowed spills to temporary files on disk instead of failing. We can
-cap its memory and see the same answer:
+DuckDB, like the large databases companies use for analysis (called data warehouses), reads only
+the columns a query names, skips partitions and row groups that cannot match, and processes data a
+couple of thousand values at a time, spread over all the computer's **cores** (the processors
+inside the chip, each able to work on its own; a laptop has several). A `GROUP BY` or `ORDER BY`
+that needs more memory than it is allowed **spills**: it writes part of its work to temporary files
+on disk instead of failing. We can cap its memory and see the same answer:
 
 ```python
 con.sql(f"SET memory_limit = '{DUCKDB_MEMORY}'")
@@ -1136,9 +1299,10 @@ Nothing in this module depends on the 300,000. To stream the whole teaching libr
 `N_MOLECULES` in the Setup block to `chemlib.size()`: there are 70 batches instead of 12, the run
 takes about six times as long, and peak memory stays at one batch. Past a few hundred million rows,
 teams make the same choices at a larger scale: more partition columns (vendor and scaffold family,
-say), compact column types chosen once in the schema, files kept in object storage such as Amazon
-S3, which DuckDB and PyArrow read directly, and, when one machine is too slow rather than too
-small, the work spread over many cores or machines, which is Module 9.
+say), compact column types chosen once in the schema, files kept in cloud storage such as Amazon
+S3 (storage rented over the internet, which DuckDB and PyArrow read directly), and, when one
+machine is too slow rather than too small, the work spread over many cores or machines, which is
+[Module 9](../09-parallel-and-distributed/).
 
 ## Try it yourself
 

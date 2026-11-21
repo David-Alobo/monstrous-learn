@@ -6,36 +6,61 @@ files: recorded/*.json
 ---
 
 Most chemical data a company uses is not made in-house. Bioactivity values come from ChEMBL,
-structures and properties from PubChem, and both grow every release. A pipeline that downloads
-everything again every night is slow, puts needless load on services that are free and shared, and
-cannot tell you what is new. Industry pipelines load **incrementally**: they remember how far they
-got (a **high-water mark**), ask only for what came after it, and write in a way that makes a
-repeated request harmless. They are also defensive about the source: an API can change its fields,
-send a value as text, or fail for an hour, and the pipeline must notice instead of filling the
-database with nonsense.
+structures and properties from PubChem, and both grow every release. Both can be read by programs
+through an **API** (application programming interface): a web address that answers a program's
+request with data instead of a web page for people. Reading data from a source into your own
+database is called **ingestion**.
+
+A pipeline that downloads everything again every night is slow, puts needless load on services
+that are free and shared, and cannot tell you what is new. Industry pipelines load
+**incrementally**: they remember how far they got (a **high-water mark**, like the line a flood
+leaves on a wall), ask only for what came after it, and write in a way that makes a repeated
+request harmless. They are also defensive about the source: an API can change its fields, send a
+value as text, or fail for an hour, and the pipeline must notice instead of filling the database
+with nonsense.
 
 This module loads IC50 values for one kinase, IKK-epsilon (ChEMBL target CHEMBL3529, an
 inflammation and oncology target), from the ChEMBL web services, and compound properties from
 PubChem. To make the lesson run offline and give the same output every time, it replays responses
-recorded from the real services; one switch makes it call them live instead.
+recorded from the real services; one switch makes it call them live instead. (pChEMBL, which
+appears throughout, is ChEMBL's way of putting IC50 and similar values on one scale: −log10 of the
+value in mol/L, so 1 µM is 6 and 10 nM is 8.)
 
 By the end of this module you will be able to:
 
-- call ChEMBL and PubChem politely: a User-Agent, timeouts, a rate limit, retries on 429 and 5xx;
-- record real responses once and replay them, so pipeline code can be tested offline;
-- page through an API with `limit`, `offset` and `page_meta.next`, and know where paging goes wrong;
-- check every record against a Pydantic model, so a changed API fails loudly at the door;
-- load incrementally with a high-water mark, upsert idempotently, and run a backfill over a range;
-- state the licence of each source and keep attribution with the stored data.
+- ask ChEMBL and PubChem for data politely: say who you are, give up on an answer that never
+  comes, keep to a number of requests per second, and try again when the service is only busy;
+- save real answers once and replay them, so the code can be tested without the internet;
+- fetch a large result one page at a time, and know where that can go wrong;
+- check every record against a written description of what it must look like, so a change in
+  the service stops the run with a clear message;
+- fetch only the records added since the last run, store them so that fetching one twice does no
+  harm, and fetch an older range again on purpose when it needs fixing;
+- say under which licence each source's data may be used, and keep that with the stored data.
 
-You need Python with requests, tenacity, Pydantic, DuckDB and pandas. The recordings are small JSON
-files in the module's `recorded/` folder, made by `record.py`.
+From earlier modules we use the retries with back-off, upserts, quarantine and atomic writes of
+[Module 10](../10-pipelines-that-survive-failure/), and DuckDB from
+[Module 8](../08-larger-than-memory/). Module 10 is the one to have done first.
+
+The lesson uses these packages:
+
+- **requests** sends requests to web services and receives their answers;
+- **tenacity** tries a failed request again, with waits in between (as in Module 10);
+- **Pydantic** checks each record against a model of what it must look like;
+- **DuckDB** is a database kept in one file, good at answering questions about whole tables;
+- **pandas** prints query results as tables.
+
+The answers the services gave are saved as small JSON files (JSON is a text format for nested lists
+and dictionaries, the format most web services answer in) in the module's `recorded/` folder, made
+by the module's `record.py` script. In Colab the first cell downloads them next to the notebook.
 
 ## Setup
 
 Everything this lesson needs is imported and set here, so the settings can be changed in one place.
 Pipeline steps report with `log`; `print` is kept for showing you results; Module 1 explains why.
 The query itself, and the ids the lesson's runs use, stay with the sections that explain them.
+Leave `LIVE = False` for now: the lesson then needs no internet and prints what the page shows.
+Section 2 explains the settings for being polite to the services.
 
 ```python
 import hashlib
@@ -104,7 +129,8 @@ request, and store it with the data, because the person who uses a table in two 
 know where it came from.
 
 - **ChEMBL** data are made available under the **Creative Commons Attribution-ShareAlike 3.0
-  Unported licence** (CC BY-SA 3.0), as stated on the ChEMBL website. You may use, change and
+  Unported licence** (CC BY-SA 3.0; *Attribution* means you must credit the source, *ShareAlike*
+  that what you build from it must be shared under the same terms), as stated on the ChEMBL website. You may use, change and
   redistribute them, including commercially, if you credit ChEMBL and, when you share a database
   derived from them, share it under the same licence.
 - **PubChem** is run by NCBI, whose policy is that NCBI "places no restrictions on the use or
@@ -116,11 +142,18 @@ every row carries a `source` column saying where it came from and under which li
 
 ## 2. A polite client
 
-ChEMBL and PubChem are free services shared by everyone. PubChem's usage policy asks that no user
-make more than 5 requests per second, and it rejects requests above its limits with HTTP 503; users
-who keep exceeding them are blocked for a while. A polite client does four things:
+ChEMBL and PubChem are free services shared by everyone. A program talks to them with **HTTP**,
+the same way a web browser does: it sends a **request** for a web address (a URL), and the service
+sends back a **response** with a **status code**, a number saying how it went, and a body, here
+JSON. The codes that matter here: 200 means success; 400 to 499 mean the request was wrong (404:
+"not found"; 429: "too many requests", slow down); 500 to 599 mean the service itself failed (503:
+"unavailable for now"). PubChem's usage policy asks that no user make more than 5 requests per
+second, and it rejects requests above its limits with HTTP 503; users who keep exceeding them are
+blocked for a while. A program that sends requests is called a **client**. A polite client does
+four things:
 
-- says who it is, in a **User-Agent** header, so the service can contact you rather than block you;
+- says who it is, in a **User-Agent** header (a line of information sent with each request), with
+  a contact address, so the service can contact you rather than block you;
 - sets a **timeout**, so a request that hangs does not hang the pipeline for ever;
 - keeps to a **rate limit**, by waiting before a request if the last one was too recent;
 - **retries** transient failures (429 "too many requests", and 500, 502, 503, 504) with
@@ -128,7 +161,12 @@ who keep exceeding them are blocked for a while. A polite client does four thing
   means the request is wrong, and asking again will not fix it.
 
 The rate limiter takes its clock and its sleep function as arguments, so here it runs on a pretend
-clock and the lesson does not have to wait:
+clock and the lesson does not have to wait. It remembers the earliest time the next request is
+allowed (`next_allowed`, which starts at minus infinity, `-math.inf`, so the first request never
+waits). Before each request, `wait()` sleeps until that time if it has not come yet, then moves it
+one interval (0.2 s at five per second) further on. `time.monotonic` is a clock that only ever goes
+forward, which is what you want for measuring gaps; `for _ in range(12)` repeats 12 times, the `_`
+saying we do not need the loop's counter:
 
 ```python
 class RateLimiter:
@@ -181,11 +219,22 @@ Twelve requests at five per second take 2.2 seconds; without the limiter a loop 
 a few milliseconds. In live use there is one limiter per service: 5 per second for PubChem, as its
 policy asks, and 2 per second for ChEMBL, a conservative choice of ours.
 
-Now the request itself, with tenacity retrying what is transient. The function takes the HTTP
-session as an argument so we can try it against a pretend server that answers with chosen status
-codes, first two transient failures and then success, then a 404. tenacity's `Retrying` is
-imported in the Setup block; each retry is logged as a warning, because someone reading a nightly
-job's log wants to know a service was struggling, even when it recovered:
+Now the request itself, with tenacity retrying what is transient. A `requests.Session` keeps one
+connection to a service open across many requests, which is faster than opening a new one each
+time; `session.get(url, ...)` sends one request. `urlsplit(url).netloc` picks the host name out of
+a URL (`www.ebi.ac.uk` from `https://www.ebi.ac.uk/chembl/...`), so each service gets its own rate
+limiter. The function takes the session as an argument so we can try it against a pretend server
+that answers with chosen status codes, first two transient failures and then success, then a 404.
+
+In Module 10 tenacity was used as a decorator. Here it is written as a loop instead, with
+`Retrying`, imported in the Setup block: `for attempt in retrying:` followed by `with attempt:`
+runs the block inside once per attempt; if the block raises one of the errors named in `retry=`,
+tenacity waits and goes round again, and once the block returns, the loop ends. You can read it as
+"try this, up to five times". `before_sleep=log_retry` is a function tenacity calls before each
+wait: each retry is logged as a warning, because someone reading a nightly job's log wants to know
+a service was struggling, even when it recovered. `response.raise_for_status()` raises an error
+for any status of 400 or more, and `response.json()` turns the JSON body into Python lists and
+dictionaries:
 
 ```python
 SESSION = requests.Session()
@@ -288,6 +337,9 @@ WARNING attempt 2 failed (HTTP 429 from example.org); retrying
 ERROR not retried (1 request): 404 Client Error
 ```
 
+The pretend server answered 503 and 429, which were retried, then 200, and the data came back. The
+404 was raised at once, after one request.
+
 Servers that are overloaded sometimes say how long to wait in a `Retry-After` header; a client that
 honours it is more polite still. tenacity's `wait` can be any function, so it can read that header.
 
@@ -298,13 +350,19 @@ data as yesterday. (While this module was written, the ChEMBL web services answe
 with HTTP 500 for long stretches; the retry logic above is not theory.) The industry pattern is **record and
 replay**: call the real service once, save each response with the request that produced it, and let
 the code under test read the saved responses. Libraries such as vcrpy and pytest-recording do this
-for test suites; here it is in a few lines.
+for test suites (collections of automatic checks on code); here it is in a few lines.
 
-Every request is first written in one canonical form, its parameters sorted, so the same request
-always has the same name on disk. `fetch_json` is the only function in the module that touches the
+A request to these services is a URL with **query parameters** after a `?`, such as
+`activity.json?target_chembl_id=CHEMBL3529&limit=100`: each `name=value` pair, joined by `&`, says
+what we want. The same request can be written with its parameters in any order, so every request
+is first written in one canonical form, its parameters sorted, and the same request always has the
+same name on disk. That name comes from a **hash** of the URL: a short code computed from it (the
+same URL always gives the same code), so the file name is short and safe whatever the URL holds. `fetch_json` is the only function in the module that touches the
 network. With `LIVE = False` it reads `recorded/`; with `LIVE = True` it calls the service
 politely and keeps each response in `work/http-cache/` (a disk cache: a second live run makes no
-requests it has made before). Either way the caller gets the same JSON:
+requests it has made before). Either way the caller gets the same JSON. `params: dict | None = None`
+means the argument is a dictionary or `None` (nothing), and is `None` unless given; `{**QUERY,
+"limit": "50"}`, used later, makes a copy of the dictionary `QUERY` with one entry added or changed:
 
 ```python
 def canonical_url(url: str, params: dict | None = None) -> str:
@@ -381,12 +439,15 @@ the day it was fetched, so production caches have an expiry (hours, or until the
 
 ## 4. Pages: limit, offset and next
 
-ChEMBL never returns a large result in one response. Its activity endpoint returns `limit` records
-starting at `offset`, plus a `page_meta` block that says
-how many records match and gives the URL of the next page. Here is our query: IC50 values with a
+ChEMBL never returns a large result in one response. Its activity **endpoint** (the URL that
+answers questions about activities) returns `limit` records starting at `offset` (the number of
+records to skip first), plus a `page_meta` block that says how many records match and gives the URL
+of the next page. So `limit=100&offset=200` asks for records 201 to 300. Here is our query: IC50 values with a
 pChEMBL value for IKK-epsilon, ordered by `activity_id`, 100 per page, with `only` naming the fields
 we need (smaller responses, kinder to the server). The page size, `PAGE_SIZE`, is set in the Setup
-block:
+block. In the query, `__isnull`, `__gt` (greater than) and `__lte` (less than or equal) are
+ChEMBL's way of writing conditions: `"pchembl_value__isnull": "false"` asks for records that have a
+pChEMBL value. `json.dumps(..., indent=1)` prints the JSON laid out over several lines:
 
 ```python
 QUERY = {
@@ -433,7 +494,11 @@ Two things to notice in the record. Numbers arrive as text (`"standard_value": "
 something must turn them into numbers and complain if one is not. And the response holds fields we
 did not ask for: services add fields over time, which a loader should ignore rather than fail on.
 
-Following `next` until it is empty walks through every page:
+Following `next` until it is empty walks through every page. `pages` is a **generator**: instead
+of `return`, it has `yield`, which hands one page to the `for` loop that is using it and pauses
+until the loop asks for the next one. So only one page is fetched and held at a time, and the loop
+can stop early. (`Iterator[dict]` in the type hint says "gives dictionaries one at a time"; in the
+`print`, `{meta['offset']:>3}` writes the offset right-aligned in three characters.)
 
 ```python
 def pages(params: dict) -> Iterator[dict]:
@@ -474,13 +539,25 @@ in section 6 does between runs.
 
 ## 5. Check every record at the door
 
-A loader that trusts its source stores whatever arrives. If ChEMBL renamed `molecule_chembl_id`
+A loader (the part of a pipeline that stores what it fetched) that trusts its source stores
+whatever arrives. If ChEMBL renamed `molecule_chembl_id`
 tomorrow, or a value arrived as `"n/a"`, such a loader would store empty or broken rows, and the
 first person to notice would be a chemist whose model behaves strangely months later. A **Pydantic
 model** states what a record must look like; every record is checked against it before anything
-is stored. Module 12 covers Pydantic in depth; here is the model for one activity, with a chemistry
-check: pChEMBL is −log10 of the molar value, so for a value in nM it must equal 9 − log10(value).
-`BaseModel` and the other Pydantic names are imported in the Setup block.
+is stored. [Module 12](../12-validating-data/) covers Pydantic in depth; here is the model for one activity,
+with a chemistry check: pChEMBL is −log10 of the molar value, so for a value in nM it must equal
+9 − log10(value). `BaseModel` and the other Pydantic names are imported in the Setup block.
+
+How to read the model, as in Module 10's settings class: each line `name: type` is a field the
+record must have, with its type. `str | None` means text or nothing (ChEMBL sends `null`, which
+Python reads as `None`, when a value is missing). `Field(gt=0)` adds a limit (`gt` greater than,
+`ge` and `le` greater or less than or equal). `Field(pattern=r"^CHEMBL\d+$")` gives a **regular
+expression**, a pattern the text must match: `^` the start, `CHEMBL` those letters, `\d+` one or
+more digits, `$` the end, so `CHEMBL375787` passes and `375787` does not (the `r` before the quotes keeps the backslash
+as it is). `extra="ignore"` in `model_config` drops fields the model does not list, and
+`frozen=True` means a checked record cannot be changed afterwards. `@model_validator` marks
+a check that looks at several fields together. `Activity.model_validate(record)` checks a
+dictionary and returns an `Activity`, or raises `ValidationError` saying what is wrong.
 
 ```python
 class Activity(BaseModel):
@@ -519,7 +596,9 @@ activity_id=1812436 molecule_chembl_id='CHEMBL375787' document_chembl_id='CHEMBL
 
 The text values became numbers, and the fields we do not use were dropped. Now three records that
 must not get in: a value that is not a number, a record from an API that renamed a field, and a
-record whose pChEMBL does not match its value:
+record whose pChEMBL does not match its value. Each broken record is a copy of the good one with
+one change; the second is built with a **dictionary comprehension**, `{new_key: v for k, v in
+record.items()}`, which makes a new dictionary from the old one key by key, here renaming one key:
 
 ```python
 broken = {
@@ -555,7 +634,8 @@ def validate_page(page: dict) -> list[Activity]:
 
 ## 6. Incremental loads with a high-water mark
 
-The data go into DuckDB (Module 4), in two tables: `activities`, keyed by `activity_id`, and
+The data go into DuckDB ([Module 8](../08-larger-than-memory/); Module 4 introduces it with the
+other databases), in two tables: `activities`, keyed by `activity_id`, and
 `load_state`, one row per source holding its **high-water mark**: the largest `activity_id` loaded
 so far. Each run asks ChEMBL only for activities above the mark (`activity_id__gt`), upserts them,
 and moves the mark. The upsert and the new mark are written in one transaction, page by page, so a
@@ -563,6 +643,12 @@ crash halfway through a run loses at most the page in flight and the next run re
 last page stored.
 
 The connection stays open across the next few sections and is closed at the end of section 9.
+
+The SQL is the same as Module 10's, with DuckDB's types (`BIGINT` for large whole numbers,
+`VARCHAR` for text, `DOUBLE` for decimals) and `?` as the placeholder for each value, filled in
+order from a list. `con.begin()` starts a transaction (a group of changes saved together or not at
+all) and `con.commit()` saves it. The `# fmt: skip` comment only tells the course's code formatter
+to leave that line's layout alone.
 
 ```python
 DB_PATH.unlink(missing_ok=True)
@@ -631,7 +717,8 @@ def load_increment(con: duckdb.DuckDBPyConnection, until: int | None = None) -> 
 In real use every run is the same call, `load_increment(con)`: the first run has a mark of 0 and
 fetches everything, and later runs fetch what has been added since. To see a second run find new
 records without waiting months for a ChEMBL release, the lesson's first run stops at activity id
-18,811,464, as if it had run before the later records were added:
+18,811,464, as if it had run before the later records were added. Each run prints its old and
+new mark, the pages and records fetched, and the rows now stored:
 
 ```python
 log.info("run 1: %s", load_increment(con, until=FIRST_RUN_CUTOFF))
@@ -647,7 +734,8 @@ INFO run 3: mark 28800434 -> 28800434; pages: 1, records fetched: 0; stored: 393
 The second run asked only for activities above the first run's mark and found the newer ones; the
 third found nothing and cost one small request. Requests are cheap to repeat because the load is
 idempotent. Here the first page of run 1 is fetched and loaded again, as happens after a crash
-between storing a page and moving on, and the table does not change:
+between storing a page and moving on, and the table does not change (`{before[1]:.2f}` prints the
+total with two decimals):
 
 ```python
 before = con.execute("SELECT COUNT(*), SUM(pchembl_value) FROM activities").fetchone()
@@ -679,7 +767,9 @@ explicitly, and it leaves the high-water mark alone, so the next incremental run
 before.
 
 To make the effect visible, we pretend an earlier version of our loader lost the pChEMBL values
-of some records, then backfill that range:
+of some records, then backfill that range. `BETWEEN ? AND ?` in SQL means "from the first value to
+the second, both included", and `backfill(con, *BACKFILL)` unpacks the pair `BACKFILL` into the
+function's two arguments, `first_id` and `last_id`:
 
 ```python
 BACKFILL = (16279324, 16354699)  # the range of activity ids to fetch again
@@ -728,13 +818,18 @@ with checkpoints, exactly as in Module 10, and at a quiet time: it is a heavy lo
 
 ## 8. PubChem: properties for a list of compounds
 
-PubChem's PUG REST interface returns a table of properties for a comma-separated list of CIDs
-(PubChem's compound ids) in one request, such as
+PubChem's PUG REST interface (PUG is PubChem's name for its interface for programs; REST means it
+is used through plain URLs, as ChEMBL's is) returns a table of properties for a comma-separated
+list of CIDs (PubChem's compound ids; aspirin is 2244) in one request, such as
 `/rest/pug/compound/cid/2244,2519/property/MolecularFormula,MolecularWeight,SMILES,InChIKey/JSON`.
 Sending several CIDs per request means fewer requests, which is what the usage policy asks for;
 very long lists should be split into chunks (`CHUNK_SIZE` is 5 here to show the chunking; real
 pipelines use hundreds). Incremental here means asking only for CIDs not stored yet. Note that
-PubChem sends the molecular weight as text, `"180.16"`; the model turns it into a number.
+PubChem sends the molecular weight as text, `"180.16"`; the model turns it into a number. PubChem
+names its fields in capitals (`MolecularWeight`), so each field in the model gives that name as an
+`alias` and uses a shorter Python name (`mol_wt`) itself. `[*CIDS_FIRST, 54678486, ...]` makes a new
+list holding everything in `CIDS_FIRST` followed by the extra CIDs, and `.df()` turns a DuckDB
+result into a pandas table for printing.
 
 ```python
 class Compound(BaseModel):
@@ -823,8 +918,9 @@ expect, and the fault is in one input, not in the API.
 ## 9. Keeping the source with the data, and writing Parquet
 
 Every stored row says where it came from and under which licence, so the attribution travels with
-the data into every export. Analysts and the next pipeline usually read Parquet files rather than
-the database; DuckDB writes them directly. At the end, `Counter` (from `collections`, imported in
+the data into every export. Analysts and the next pipeline usually read Parquet files (the compact file format for tables
+from [Module 3](../03-files-and-identity/)) rather than the database; DuckDB writes them directly,
+with `COPY table TO 'file' (FORMAT parquet)`, and can read them back as if they were tables. At the end, `Counter` (from `collections`, imported in
 the Setup block) counts the requests made to each service: it counts and sorts in one step.
 
 ```python
@@ -853,7 +949,8 @@ you used. Keep the release number (ChEMBL's `status` endpoint reports it) and th
 your load state, so the data can be traced to their source years later.
 
 At scale, the same design holds. For all of ChEMBL's activities (millions of records), the bulk
-downloads (SQL dumps per release) are the better first load, and the web services serve the
+downloads (SQL dumps per release: the whole database as one file you load into your own) are the
+better first load, and the web services serve the
 incremental top-ups between releases. dlt, which Series 2 uses, provides incremental cursors,
 pagination helpers and merge (upsert) loading as configuration; this module is what it does
 underneath.

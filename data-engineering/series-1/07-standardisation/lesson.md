@@ -10,28 +10,47 @@ it with a molecule of solvent. Chemically these are one compound under test; as 
 different SMILES and different InChIKeys, so a database that stores them as they come holds four
 compounds, splits their assay results four ways, and never notices.
 
-**Standardisation** turns every record into one canonical form before its identity is computed and
-before it is stored. It is a transformation of the data, so it needs the same care as any code that
-changes data: it must be a single, deterministic function, its rules must be versioned and recorded
-with every output, and it must be tested.
+**Standardisation** turns every record into one canonical form (one agreed way of writing the
+compound) before its identity is computed and before it is stored. It is a transformation of the
+data, so it needs the same care as any code that changes data: it must be a single function that
+always gives the same answer for the same input, its rules must carry a version number that is
+stored with every output, and it must be tested.
 
 By the end of this module you will be able to:
 
-- explain the four standard steps (clean-up, parent fragment, neutralisation, canonical tautomer)
-  and what each one changes;
-- run them with RDKit's `rdMolStandardize`;
-- write standardisation as one pure function with a versioned, hashed configuration;
-- test it for idempotency, invariance and known cases;
-- run it on a library, record its provenance, and find the duplicates it reveals;
-- judge when canonical tautomers are worth their cost.
+- explain the four usual steps (clean up how groups are drawn, keep the main compound and drop salts
+  and solvents, remove charges, and optionally pick one tautomer) and what each one changes;
+- run them with RDKit's `rdMolStandardize` module;
+- write standardisation as one function whose settings are written down, given a version and a
+  short fingerprint;
+- test that running it twice changes nothing, that two ways of writing a molecule give one answer,
+  and that agreed examples come out as agreed;
+- run it on a library, store beside each record where it came from and which rules made it, and
+  find the duplicates it reveals;
+- judge when picking one tautomer is worth the time it takes.
 
-Everything here runs in a browser notebook or on any laptop: you need Python, RDKit, pandas and
-pyarrow.
+From earlier modules we use canonical SMILES, the InChIKey and SMARTS patterns
+([Module 2](../02-text-patterns-and-numbers/)), the teaching library `chemlib`, Parquet files and
+finding duplicates by InChIKey ([Module 3](../03-files-and-identity/)), and the validation gate
+and its idea of fixable faults ([Module 6](../06-validating-molecules/)).
+
+The lesson uses RDKit for the chemistry, pandas for tables (a table in pandas is a **DataFrame**),
+pyarrow, which pandas uses to write Parquet files, and `chemlib`, the course's own package that
+makes and damages a teaching library. Everything here runs in a browser notebook (Google Colab) or
+on any laptop.
 
 ## Setup
 
 Everything this lesson needs is imported and set here, so the settings can be changed in one place.
 Pipeline steps report with `log`; `print` is kept for showing you results; Module 1 explains why.
+
+Besides the packages above, the block imports tools that come with Python itself (its **standard
+library**), each explained where it is first used: `hashlib` and `json` make the short fingerprint
+of section 3, `time` measures how long code takes (section 6), `Path` handles file and folder
+names, and `Callable` and `NamedTuple` are used to describe and build small records (section 3).
+As in Module 6, `4_000` is four thousand (the underscore is only for reading), curly brackets with
+plain values make a **set** (a collection with no order and no repeats), and the comment
+`# fmt: skip`, used later, only tells the course's code formatter to leave a line alone.
 
 ```python
 import hashlib
@@ -81,7 +100,9 @@ WORK.mkdir(exist_ok=True)
 ## 1. One compound, many records
 
 Take one molecule from the course's teaching library (`chemlib`, as in Module 6), a benzamide with a
-basic piperidine, and write it the ways real files do:
+basic piperidine, and write it the ways real files do. In SMILES a full stop separates two pieces
+in one record, so `.Cl` is hydrogen chloride beside the compound and `.O` a molecule of water;
+`{name:22}` in the f-string pads each name to 22 characters so the keys line up:
 
 ```python
 records = {
@@ -108,9 +129,9 @@ compound is, and only then is the identity computed.
 
 ## 2. The steps
 
-RDKit's `rdMolStandardize` module provides each step. (It began as a port of MolVS, a Python
-package that has had no release since version 0.1.1 in 2018; use `rdMolStandardize`, which is
-maintained inside RDKit itself.)
+RDKit's `rdMolStandardize` module provides each step. (It began as a copy, rewritten inside RDKit,
+of MolVS, a Python package that has had no release since version 0.1.1 in 2018; use
+`rdMolStandardize`, which is maintained inside RDKit itself.)
 
 ![The standardisation steps in order: clean-up applies normalisation rules, the parent step keeps the largest organic fragment, the uncharger neutralises charges by adding or removing hydrogens, and the optional tautomer step picks one canonical tautomer. A record goes in at the left and its canonical SMILES and InChIKey come out at the right, with the rules version and configuration hash recorded beside them](figures/standardisation-steps.svg)
 
@@ -118,8 +139,9 @@ maintained inside RDKit itself.)
 
 Some groups can be drawn in more than one way: a sulfoxide as `S=O` or with separated charges as
 `[S+][O-]`. RDKit's sanitisation already redraws a few (a nitro group written `N(=O)=O` becomes
-`[N+](=O)[O-]` as it is read), and `rdMolStandardize.Cleanup` applies a longer list of
-**normalisation rules**:
+`[N+](=O)[O-]` as it is read; **sanitisation** is RDKit's check of valences and aromaticity, as in
+Module 6), and `rdMolStandardize.Cleanup` applies a longer list of **normalisation rules**, each
+of which redraws one kind of group in RDKit's preferred way:
 
 ```python
 for smiles in ["CN(=O)=O", "CS(C)=O", "C[S+](C)[O-]"]:
@@ -139,7 +161,9 @@ which convention wins matters much less than applying one convention to every re
 ### The parent: strip salts and solvents
 
 The **parent** is the compound without its counter-ions and solvents. The simplest rule, and the
-usual one, keeps the largest organic fragment:
+usual one, keeps the largest organic fragment (a **fragment** is one of the separate pieces of a
+record). In RDKit this is an object, a `LargestFragmentChooser`, that is made once with its
+settings and then used with `chooser.choose(mol)`:
 
 ```python
 chooser = rdMolStandardize.LargestFragmentChooser(preferOrganic=True)
@@ -206,8 +230,22 @@ shows when to skip it.
 Each step is a choice (which fragment, which charges, which tautomer, how many tautomers to try),
 and a change to any of them changes the output for some molecules. So the whole of standardisation
 is written as **one pure function**: the same input and the same options always give the same
-output, and it reads and changes nothing else. Its options are an immutable object, and the rules
-carry a **version** and a short **hash** of the full configuration, recorded with every output:
+output, and it reads and changes nothing else (no settings hidden elsewhere, no files, no clock).
+Its options are an **immutable** object, one that cannot be changed after it is made, and the rules
+carry a **version** and a short **hash** of the full configuration, recorded with every output.
+
+A hash is a fingerprint of a piece of text: a short string of letters and digits computed from it,
+which changes completely if any character of the text changes. So two outputs with the same hash
+were made with exactly the same settings. The code below works in four small steps:
+
+- `Options` is a named tuple (Module 6), a small record with named fields, here each with a
+  default value after the `=`; `Options(tautomer=True)` makes one with only that field changed;
+- `options._asdict()` turns it into a dictionary, and `**` copies that dictionary's entries into
+  the new dictionary `config`, beside the rules version and the RDKit version;
+- `json.dumps(config, sort_keys=True)` writes the dictionary as one line of text, with its keys
+  always in the same order, so the same settings always give the same text;
+- `hashlib.sha256(...)` computes the hash of that text (as bytes, hence `.encode("utf-8")`), and
+  `.hexdigest()[:12]` keeps its first 12 characters, which is plenty to tell configurations apart:
 
 ```python
 RULES_VERSION = "1.0.0"  # change it whenever a step or a default changes
@@ -244,7 +282,16 @@ The RDKit version is part of the hash because a new release can change a rule or
 SMILES; the same options under another RDKit are another configuration.
 
 The function itself runs the steps that are switched on, in a fixed order, and notes which ones
-changed the molecule:
+changed the molecule. It is built from two parts:
+
+- `steps_for` makes the list of steps for a set of options. Each step is a pair: its name and the
+  function that does it (written without brackets, so it is stored, not run). The type hint
+  `Callable[[Chem.Mol], Chem.Mol]` says each such function takes a molecule and returns one.
+- `standardise` reads the SMILES, then runs each step in turn, comparing the SMILES before and
+  after to see whether the step changed anything. `{smiles!r}` in the error message shows the
+  SMILES in quotes, and `raise ValueError(...)` stops with that message, because an unreadable
+  SMILES should never reach this function. The result is another named tuple, `Standardised`;
+  `tuple[str, ...]` means a tuple of any number of strings.
 
 ```python
 class Standardised(NamedTuple):
@@ -306,7 +353,8 @@ all call `standardise` get the same answer, because nothing else is involved.
 ## 4. Testing it like software
 
 A standardiser touches every structure in the database, so a bug in it is a bug everywhere. Three
-kinds of test catch most of them.
+kinds of test catch most of them. Each test is a function full of `assert` lines; `assert` stops the
+program with an error if what follows it is False, so a test that runs to the end has passed.
 
 **Known cases** pin down behaviour that chemists have agreed on. If a rule changes and one of these
 breaks, the change was not harmless:
@@ -329,11 +377,17 @@ log.info("known cases pass")
 INFO known cases pass
 ```
 
-**Idempotency**: standardising a standard form changes nothing,
+**Idempotency** (from Latin for "the same power"): standardising a standard form changes nothing,
 `standardise(standardise(x)) == standardise(x)`. If it fails, a record's identity depends on how
 many times it went through the pipeline. **Invariance**: different SMILES of the same molecule give
 the same output. If it fails, the identity depends on how the vendor happened to write the record.
-Both are properties that must hold for every molecule, so we test them on many:
+Both are properties that must hold for every molecule, so we test them on many.
+
+For the invariance test, `Chem.MolToRandomSmilesVect(mol, n, randomSeed=...)` writes `n` different,
+randomly ordered but valid SMILES of the same molecule (the seed makes the random choice the same
+on every run). `[smiles, *variants]` is a list of the original SMILES followed by all the variants,
+and the curly brackets around the comprehension make a set of the outputs: if the set holds one
+SMILES, every variant gave the same answer:
 
 ```python
 def is_idempotent(smiles: str, options: Options = DEFAULT) -> bool:
@@ -358,10 +412,13 @@ INFO idempotent: 500 of 500
 INFO invariant: 500 of 500
 ```
 
-All 500 molecules pass both tests. In a project these functions live in a test file (`test_standardise.py`) and are run by **pytest**,
-which finds every function whose name starts with `test_` and reports each failure with the values
-involved; continuous integration runs them on every change (Module 13). The plain `assert`s here are
-exactly what pytest runs.
+All 500 molecules pass both tests. In a project these functions live in a test file
+(`test_standardise.py`) and are run by **pytest**, a Python package for running tests, which finds
+every function whose name starts with `test_` and reports each failure with the values involved.
+**Continuous integration**, a service that runs the tests automatically every time the code is
+changed, runs them on every change (Module 13). The plain `assert`s here are exactly what pytest
+runs. You do not need pytest for this lesson: in the notebook we call the test functions
+ourselves.
 
 ## 5. Standardising a dirty library
 
@@ -371,7 +428,10 @@ Standardisation assumes a molecule that can be read and is worth keeping, so it 
 validation gate. Here is a short version of Module 6's gate: records that cannot be read, or that
 contain an element outside the allow-list (`ALLOWED_ELEMENTS`, set in the Setup block) or a fragment
 that is neither a known salt nor a known solvent (`SALTS_AND_SOLVENTS`), are rejected; everything
-else goes on:
+else goes on. Unlike Module 6, this short gate keeps no reasons, only the verdict, so it switches
+RDKit's messages off with `RDLogger.DisableLog`. As in Module 6, the largest piece is found with
+`max(..., key=lambda s: ...)`: a **lambda** is a one-line function without a name, here giving the
+number of heavy atoms of a SMILES `s`, and `max` keeps the piece for which it is highest:
 
 ```python
 RDLogger.DisableLog("rdApp.*")  # the reasons are Module 6's subject; here we only need verdicts
@@ -417,7 +477,17 @@ they are good records, and standardisation is where they are found.
 Duplicates hidden by salts appear when sources are merged. A second supplier, vendor B, sells some
 of vendor A's compounds that have a basic amine, as hydrochloride salts written with the charges
 drawn in, or as trifluoroacetate (TFA) salts, the usual form after purification by HPLC. We make
-its catalogue from vendor A's records:
+its catalogue from vendor A's records.
+
+This step only builds test data, so you can read it lightly. It finds a basic amine with a SMARTS
+pattern (Module 2), `BASIC_AMINE`: a nitrogen with one or two hydrogens that is not part of an
+amide, not attached to an aromatic ring and not bonded to another S, N or O. `as_hydrochloride`
+then puts a hydrogen and a `+` charge on the first such nitrogen and adds a chloride ion. It uses
+`Chem.RWMol`, an editable copy of a molecule (RDKit's ordinary molecules cannot be changed atom
+by atom). The table of vendor B is made with a comprehension that alternates between the two
+kinds of salt: `k % 2 == 0` is True for even row numbers, which become hydrochlorides, and the odd
+ones get a TFA salt. The ids are written with `{k:05d}`, a whole number padded with zeros to five
+digits:
 
 ```python
 BASIC_AMINE = Chem.MolFromSmarts("[NX3;H2,H1;!$(N-C=[O,N,S]);!$(N-a);!$(N-[S,N,O])]")
@@ -457,7 +527,10 @@ VB-00001 c1cc(C8CCNCC8)c(cc1)Oc2ccc(cc2)C(=O)N(C(C)C)C(F)(F)F.O=C(O)C(F)(F)F
 
 ### Run it, with provenance
 
-Every record that passed the gate, from both suppliers, goes through `standardise`. The output
+**Provenance** is the record of where a piece of data came from and what was done to it. Every
+record that passed the gate, from both suppliers, goes through `standardise`, after `pd.concat`
+has joined the two suppliers' tables into one (`ignore_index=True` numbers the rows afresh). The
+output
 keeps the input SMILES beside the standard one, with the steps that changed it, the rules version
 and the configuration hash. Anyone can later see where a structure came from and which rules made
 it, and records made under old rules can be found and re-run when the rules change:
@@ -507,7 +580,9 @@ ML-00847014     c1c(CO)cc(cc1C(C)C)C(=O)NC(CF)C(=O)Nc8ccc(F)cc8.Cl CC(C)c1cc(CO)
 
 ### Duplicates that only standardisation reveals
 
-Now compare identities. The InChIKey of each record as received, and of its standard form:
+Now compare identities. The InChIKey of each record as received, and of its standard form. A
+**duplicate group** is an InChIKey held by more than one record; `value_counts` counts the records
+for each key, and the groups are the keys counted more than once:
 
 ```python
 def inchikey(smiles: str) -> str:
@@ -539,7 +614,10 @@ distinct compounds: 4097 -> 3897
 ```
 
 Standardisation turned 37 duplicate groups into 236, and the number of distinct compounds fell by
-200. Which records did it join? Those whose identities differed before and agree after:
+200. Which records did it join? Those whose identities differed before and agree after. The code
+groups the records by their new InChIKey: `agg(sorted)` collects the sorted ids in each group, and a
+group joins records that differed before if it holds more than one old InChIKey (`nunique() > 1`
+counts the distinct old keys). `i.startswith("VB-")` picks out vendor B's records by their id:
 
 ```python
 group_ids = standard.groupby("inchikey")["id"].agg(sorted)
@@ -567,7 +645,8 @@ repaired but matched nothing else, which is what we expect: `add_defects` damage
 molecules from the ones it duplicated. In a real merge, these joins are where assay results from
 two suppliers meet for the first time.
 
-Finally the table is written out, with its provenance columns, ready for loading (Module 4):
+Finally the table is written out as a Parquet file (Module 3), with its provenance columns, ready
+for loading into a database (Module 4):
 
 ```python
 standard_path = WORK / "standardised.parquet"
@@ -583,7 +662,10 @@ INFO wrote 4134 records to work/standardised.parquet
 ## 6. Tautomers: what they cost and when to skip them
 
 The default configuration above leaves tautomers alone. Here is why. First, the cost, on 200
-molecules from the library (timings differ from computer to computer, so yours will not match):
+molecules from the library (timings differ from computer to computer, so yours will not match).
+`time.perf_counter()` reads a clock, so the difference between two readings is the time the code
+between them took, in seconds; we multiply by 1000 for milliseconds and divide by the number of
+molecules. In the `log` lines, `%.1f` is filled in with the number, to one decimal place:
 
 ```python
 tautomer_sample = library["smiles"].head(TAUTOMER_SAMPLE_SIZE).tolist()
@@ -603,7 +685,9 @@ INFO with tautomers:    12.3 ms per molecule
 ```
 
 Here the tautomer step more than doubled the time per molecule. Then, what it changed, and how many
-tautomers it had to consider:
+tautomers it had to consider. `zip(plain, with_tautomers)` walks through the two lists side by side,
+giving each molecule's result without and with the tautomer step together, and
+`enumerator.Enumerate` lists all the tautomers RDKit finds for a molecule:
 
 ```python
 moved = [(p.smiles, t.smiles) for p, t in zip(plain, with_tautomers) if p.smiles != t.smiles]
@@ -660,7 +744,8 @@ So, when to use it, and when to skip it:
   hydrogen between heteroatoms) as one, so most tautomer duplicates are caught without this step:
   all three changes above kept their InChIKey.
 - **Identity by canonical SMILES** (a SMILES-based database key, or a machine-learning set where two
-  tautomers would leak between training and test): use it, so that tautomers of one compound are
+  tautomers of one compound could end up one in the training set and one in the test set, so the
+  model is tested on a compound it has already seen): use it, so that tautomers of one compound are
   one record.
 - **Stereochemistry matters** (single enantiomers): skip it, or set
   `CleanupParameters().tautomerRemoveSp3Stereo = False` and record that choice in the options.

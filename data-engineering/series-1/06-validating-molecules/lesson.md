@@ -14,21 +14,40 @@ deleting duplicates) and described case studies where curating the raw data sign
 a model's predictions. Public databases now do this in code: ChEMBL, for example, checks its
 structures with an open-source pipeline built on RDKit (section 7).
 
-A data engineer turns that curation into a **gate**: every record is read and checked before it is
+A **record** here is one row of a data file: one compound, with its ID and its SMILES. A data
+engineer turns that curation into a **gate**: every record is read and checked before it is
 stored, and it leaves the gate in one of two ways. It is accepted, or it is put in **quarantine**
-with the reasons written down. Nothing is dropped without a trace.
+(a separate table of records held back) with the reasons written down. Nothing is dropped without
+a trace.
 
 By the end of this module you will be able to:
 
-- explain why a failed parse must become a recorded reason, never a missing row;
-- capture RDKit's own error messages for each record;
-- write checks that return structured reasons (a code, a message and an action), not True or False;
-- check elements, fragments, charges, stereochemistry and size;
-- run a validation gate over a library and produce a quarantine table and a summary by reason;
-- measure a validator against a known truth: what it caught, what it missed and its false alarms.
+- explain why a SMILES that RDKit cannot read must be kept with a written reason, and never simply
+  left out;
+- catch RDKit's own error messages for each record;
+- write checks that say what is wrong (a short code, a message and what to do), not just True or
+  False;
+- check a molecule's elements, its separate pieces (salts, solvents), its charge, its
+  stereochemistry and its size;
+- run the gate over a whole library and make a table of the quarantined records and a count of
+  records for each reason;
+- test the gate against a library whose faults are known: what it caught, what it missed and where
+  it raised a false alarm.
 
-Everything here runs in a browser notebook or on any laptop: you need Python, RDKit, pandas and
-pyarrow.
+From earlier modules we use SMILES, stereochemistry and the InChIKey
+([Module 2](../02-text-patterns-and-numbers/)), the teaching library `chemlib`, Parquet files and
+the InChIKey as a molecule's identity ([Module 3](../03-files-and-identity/)), and the habit of
+reporting with `log` and showing values with `print` ([Module 1](../01-graphs-and-matrices/)).
+
+The lesson uses these packages:
+
+- **RDKit**, the chemistry toolkit: it reads the SMILES and checks the chemistry;
+- **pandas**, for tables (a table in pandas is called a **DataFrame**);
+- **pyarrow**, which pandas uses to write Parquet files; you never call it yourself;
+- **chemlib**, the course's own small package that makes a teaching library of molecules and can
+  damage it on purpose.
+
+Everything here runs in a browser notebook (Google Colab) or on any laptop.
 
 ## Setup
 
@@ -37,6 +56,23 @@ That includes the library's policy (the elements it allows, the salts and solven
 size limits), which section 3 explains check by check: a policy kept in one place can be read,
 reviewed and changed without hunting through the code. Pipeline steps report with `log`; `print`
 is kept for showing you results; Module 1 explains why.
+
+Besides the packages above, the block imports a few tools that come with Python itself (its
+**standard library**); each is explained where it is first used:
+
+- `re`, for **regular expressions**, patterns that match pieces of text (section 2);
+- `Counter`, a dictionary that counts things (section 4);
+- `Callable` and `NamedTuple`, used in **type hints**, the notes after a colon or `->` that say what
+  kind of value a function takes or returns (section 2);
+- `Path`, for file and folder names that work on Windows, macOS and Linux.
+
+A few Python details in the settings: `10_000` is ten thousand (the underscore only makes it easier
+to read); curly brackets such as `{"H", "B", ...}` make a **set**, a collection with no order and no
+repeats, which is quick to check membership in; `{"Cl": "hydrogen chloride", ...}` is a
+**dictionary**, which looks up a value (the name) from a key (the SMILES); and `(6, 50)` is a
+**tuple**, a fixed pair of values. The comment `# fmt: skip`, here and later, tells the course's
+code formatter to leave that line's layout alone; you can ignore it. The last line makes the
+`work` folder, if it is not there already, for the files this lesson writes.
 
 ```python
 import logging
@@ -78,9 +114,14 @@ WORK.mkdir(exist_ok=True)
 
 ## 1. What goes wrong without a gate
 
-We start from a teaching library made by `chemlib` (the course's library generator, as in Module 2)
+We start from a teaching library made by `chemlib` (the course's library generator, as in Module 3)
 and damage it on purpose with `add_defects`. The damage is on record: the `defect` column says
-which fault each row was given, so we can check our validator against the truth at the end.
+which fault each row was given, so we can check our validator against the truth at the end. (A
+**validator** is the code that does the checking.)
+
+The second `print` counts the rows of each kind of fault: `.replace("", "(none)")` gives the
+undamaged rows, whose `defect` is empty, a readable name, `value_counts()` counts each value, and
+`sort_index()` puts the names in alphabetical order.
 
 ```python
 library = chemlib.library(LIBRARY_SIZE, seed=LIBRARY_SEED)
@@ -101,7 +142,10 @@ valence        83
 ```
 
 A rate of 0.05 damaged 500 of the 10,000 molecules, split as evenly as possible across six kinds
-of fault: 417 rows were changed in place, and the 83 duplicates were added as new rows. Here is one example of each, as the file holds it:
+of fault: 417 rows were changed in place, and the 83 duplicates were added as new rows. Here is
+one example of each, as the file holds it. `groupby("defect").head(1)` keeps the first row of each
+kind of fault, `iterrows()` goes through those rows one at a time, and `{row['defect']:10}` in the
+f-string pads the name to 10 characters so the SMILES line up:
 
 ```python
 for kind, row in dirty[dirty["defect"] != ""].groupby("defect").head(1).iterrows():
@@ -116,8 +160,16 @@ salt       c1cc(c8ccco8)c(nc1)Nc2nc(C(=O)C)c(O)c(CN)n2.Cl
 invalid    ccc(N8CCCC8)c(nc1)Nc2nc(C(=O)C)c(C(C)C)c(C8CC8)n2
 ```
 
+A **valence** fault is an atom with more bonds than it can have (here a carbon with five), and an
+**invalid** SMILES is one RDKit cannot read at all (here the ring-closing `1` at the start has been
+cut off).
+
 The usual first script reads every SMILES with RDKit, silences RDKit's warnings because they clutter
-the screen, and keeps what worked:
+the screen, and keeps what worked. It is written with **list comprehensions**, the short form
+`[f(x) for x in items]` that makes a list by doing one thing to each item, with an optional
+`if` to keep only some. `sum(test for m in kept)` counts the molecules for which the test is
+True, because Python counts True as 1 and False as 0. `Chem.GetMolFrags(m)` returns the separate
+pieces of a molecule, as Module 1 found them from its graph:
 
 ```python
 RDLogger.DisableLog("rdApp.*")  # silence RDKit, as many scripts do
@@ -151,6 +203,12 @@ quarantine full of "False" cannot be acted on. Each of our checks returns a list
 instead: a short, stable **code** that programs can count and filter on, a **message** a chemist
 can read, and the **action** the gate should take.
 
+We describe an issue with a **named tuple**: a small record with named fields, made by writing a
+`class` based on `NamedTuple`. Each line inside gives a field's name and, after the colon, its
+type (`str` means text). Once it is defined, `Issue("VALENCE", "a carbon with five bonds",
+"reject")` makes one issue, and `issue.code` reads its code back. The text in triple quotes is a
+**docstring**, a short description of what the code is for.
+
 ```python
 class Issue(NamedTuple):
     """One problem found in a record: what it is, in words, and what to do about it."""
@@ -168,16 +226,28 @@ beside it.
 
 ### Capturing RDKit's messages
 
-When RDKit cannot read a SMILES it returns `None` and writes its reason to a log. We send that log
+When RDKit cannot read a SMILES it returns `None` (Python's word for "nothing") and writes its
+reason to a log, a stream of messages that normally appears on the screen. We send that log
 to Python's `logging` module, the same system our own `log` uses, and collect the messages, so each
 record keeps its own.
 
-This works because every logger can have its own **handlers**, which decide where its messages go.
-The Setup block gave the root logger one handler, which writes our pipeline's lines to the screen.
+This is the hardest code in the module, so here is the idea first. Every message goes to a
+**logger**, and every logger can have its own **handlers**, which decide where its messages go.
+`logging.basicConfig` in the Setup block gave the **root logger** (the one every other logger
+passes its messages on to) one handler, which writes our pipeline's lines to the screen.
 RDKit's messages go to a logger named `"rdkit"`, and we give it a different handler: one that
 keeps each message in a list until the gate reads it. Setting `propagate = False` stops the same
 messages also reaching the root logger's screen handler, so a reason is recorded with its record
-instead of scrolling past:
+instead of scrolling past.
+
+Our handler, `Collector`, is a class built on `logging.Handler`, so it can do everything a handler
+does; we only change two things. `__init__` runs once when the collector is made and gives it an
+empty list, `messages` (`super().__init__()` first lets `logging.Handler` set itself up).
+`emit` runs for every message and adds it to that list. RDKit starts each message with the time,
+such as `[14:02:57] `, which would make the lesson's output change on every run, so `re.sub`
+removes it: the regular expression `^\[\d\d:\d\d:\d\d\] ` means "at the start (`^`), a square
+bracket, two digits (`\d\d`), a colon, two digits, a colon, two digits, a closing bracket and a
+space". The `r` before the quotes keeps Python from reading the backslashes itself:
 
 ```python
 class Collector(logging.Handler):
@@ -206,7 +276,15 @@ ring that is never closed, or a stray bracket, fails here. **Sanitisation** then
 chemistry: valences, aromaticity, ring perception (the RDKit Book lists every step).
 `Chem.DetectChemistryProblems` runs those checks and returns every problem it finds, each with a
 type and a message, instead of stopping at the first (`Chem.SanitizeMol(mol, catchErrors=True)`
-is the other way to do it, but reports only the first failure).
+is the other way to do it, but reports only the first failure). An **aromaticity** problem
+(code `AROMATICITY`) means RDKit cannot draw the ring with alternating single and double bonds,
+which RDKit calls **kekulizing** it: a five-carbon ring written in lower case is one example.
+
+`PROBLEM_CODES` is a dictionary from RDKit's name for a problem to our short code, and
+`PROBLEM_CODES.get(name, "SANITISATION")` uses `"SANITISATION"` for any problem not in it. In
+`parse`, the type hint `tuple[Chem.Mol | None, list[Issue]]` says that it returns two things: a
+molecule or `None`, and a list of issues. `"; ".join(...)` joins RDKit's messages into one line,
+and `or` gives a plain message when RDKit wrote none.
 
 ```python
 PROBLEM_CODES = {
@@ -263,11 +341,19 @@ Every failure now carries RDKit's own words, which point to the atom at fault.
 
 ### Turning RDKit's messages down, or off
 
+*This part is optional: it is reference material for when RDKit's messages get in your way. Skip
+to [section 3](#3-checks-on-a-molecule-that-can-be-read) on a first reading: nothing later in the
+course depends on it beyond `RDLogger.DisableLog`, which section 1 already showed.*
+
 Silencing RDKit was the first script's mistake, but some messages really are noise: a pipeline
 that has recorded a parse failure as an issue does not need it on the screen as well, and a
-standardiser can write several lines of chatter per molecule. RDKit gives you five controls, from
-the bluntest to the most precise. To see what each one lets through, `heard` runs some code and
-returns what reached our collector:
+standardiser (the tool of Module 7, which redraws molecules in one standard way) can write several
+lines of chatter per molecule. RDKit gives you five controls, from the bluntest to the most
+precise. To see what each one lets through, `heard` runs some code and returns what reached our
+collector. It takes a function as its input (the hint `Callable[[], object]` means "a function
+called with no inputs"), and `two_problems` is the function we give it. In the `print`, the `*`
+in front of `heard(...)` passes each message as a separate value, and `sep="\n    "` puts each one
+on its own indented line:
 
 ```python
 def heard(action: Callable[[], object]) -> list[str]:
@@ -294,7 +380,8 @@ everything on:
 RDKit sorts its messages into four channels, `rdApp.debug`, `rdApp.info`, `rdApp.warning` and
 `rdApp.error`, and `LogToPythonLogger` delivers them to the `"rdkit"` logger at the matching
 `logging` level. The first two controls work in RDKit itself, before a message is made, so they
-apply to every handler at once:
+apply to every handler at once. The second uses a `with` block: the setting applies to the
+indented lines under `with` and is undone automatically when they finish, even if they fail:
 
 ```python
 # 1. one channel off, here the warnings, then on again
@@ -315,7 +402,8 @@ after BlockLogs: 2 messages
 ```
 
 The next two work in Python's `logging`, after the message is made, so different destinations can
-get different amounts: here the collector keeps every message and a file only the errors.
+get different amounts: here the collector keeps every message and a file only the errors. A
+`FileHandler` is a handler that writes messages to a file, here `work/rdkit.log`:
 
 ```python
 # 3. a level on RDKit's logger: here only errors and worse pass
@@ -358,7 +446,8 @@ property, returns a list of issues (empty when all is well), and is short enough
 A drug-like screening library contains a handful of elements. An **allow-list** names them
 (`ALLOWED_ELEMENTS`, set in the Setup block); anything else is either a mistake or a compound the
 library should not hold. An allow-list is safer than a list of forbidden elements, because it
-rejects what nobody thought of:
+rejects what nobody thought of. The check makes a set of the molecule's element symbols and
+subtracts the allowed set with `-`, which leaves only the elements that are not allowed:
 
 ```python
 def check_elements(mol: Chem.Mol) -> list[Issue]:
@@ -379,13 +468,21 @@ print(check_elements(Chem.MolFromSmiles("C[Se]c1ccccc1")))
 
 ### Fragments: salts, solvents and mixtures
 
-A record in more than one piece holds more than one molecule. Module 1 found the pieces of sodium
+A record in more than one piece holds more than one molecule; in SMILES the pieces are separated by
+a full stop, as in `CC(=O)[O-].[Na+]`. Module 1 found the pieces of sodium
 acetate from the graph Laplacian; RDKit's `GetMolFrags` gives the same answer directly. What to do
 depends on what the extra pieces are. A counter-ion or a solvent can be stripped to leave one
 parent compound (Module 7 does it), so those are fixable. Two drug-sized pieces are a **mixture**:
 no rule can say which one was tested, so the record is rejected. Real pipelines keep lists of
 known salts and solvents for this; ours, `SALTS` and `SOLVENTS` in the Setup block, are short
-(six counter-ions and five solvents, each with its name):
+(six counter-ions and five solvents, each with its name).
+
+The check writes each piece as a canonical SMILES (Module 2), so a piece can be looked up in
+`SALTS` and `SOLVENTS` however the record wrote it. To find the largest piece it uses
+`max(pieces, key=...)`, which picks the item with the highest value of the `key`. The key is a
+**lambda**, a one-line function without a name: `lambda s: ...GetNumHeavyAtoms()` takes a SMILES
+`s` and returns its number of heavy atoms. In the `print`, `{name:22}` pads the name to 22
+characters:
 
 ```python
 def check_fragments(mol: Chem.Mol) -> list[Issue]:
@@ -436,7 +533,9 @@ apart from the structure alone. Lists like these need a person to own them.
 A record with a net charge is either half of a salt (the other half is missing) or a charged form
 of a neutral compound, such as a protonated amine. Both can usually be neutralised (Module 7).
 Charges that cancel inside the molecule are different: a nitro group is written with a `+` and a
-`-` in RDKit, and a zwitterionic amino acid has both. We flag only a net charge:
+`-` in RDKit, and a zwitterionic amino acid has both. We flag only a net charge, the sum of the
+formal charges on all atoms. In the message, `{net:+d}` writes the whole number with its sign
+(`+1`, `-1`):
 
 ```python
 def check_charge(mol: Chem.Mol) -> list[Issue]:
@@ -462,7 +561,9 @@ CC(=O)[O-]         [Issue(code='CHARGE', message='net charge -1', action='fix')]
 Module 2 showed that the two enantiomers of ibuprofen are different molecules. A record that has a
 stereocentre but does not say which way round it is (a racemate, or simply missing information)
 cannot be told apart from either enantiomer. `Chem.FindPotentialStereo` lists every atom and double
-bond that could carry stereochemistry and whether the record specifies it:
+bond that could carry stereochemistry and whether the record specifies it. The list comprehension
+keeps only the entries whose `specified` is `Unspecified`; the rest of the check counts how many of
+those are stereocentres (tetrahedral atoms) and how many are double bonds:
 
 ```python
 def check_stereo(mol: Chem.Mol) -> list[Issue]:
@@ -499,7 +600,10 @@ Here we warn, and the warning is stored with the record.
 Size limits catch records that cannot be what the library holds: a lone solvent molecule that lost
 its compound, a fragment cut off by a broken export, a polymer or peptide in a small-molecule
 collection. We measure the largest piece, because a counter-ion says nothing about the compound,
-against the limits `HEAVY_ATOMS` and `MAX_WEIGHT` set in the Setup block:
+against the limits `HEAVY_ATOMS` and `MAX_WEIGHT` set in the Setup block. `HEAVY_ATOMS[0]` and
+`HEAVY_ATOMS[1]` are the two numbers of the tuple (Python counts from 0), and `{weight:.0f}`
+writes the weight with no decimal places. In the examples, `"C" * 60` is sixty carbons in a chain,
+and `smiles[:24]` shows only its first 24 characters:
 
 ```python
 def check_size(mol: Chem.Mol) -> list[Issue]:
@@ -534,7 +638,9 @@ library, with room to spare. Choose them from the data you expect, and write the
 ## 4. The gate
 
 The gate runs the parse step and, if the molecule can be read, every check. A record is accepted
-when it has no issues or only warnings, and quarantined otherwise. The rule fits in two functions:
+when it has no issues or only warnings, and quarantined otherwise. The rule fits in two functions.
+`CHECKS` is a list of the five check functions themselves (written without brackets, so they are
+not run yet), and `validate` runs each of them in turn on the molecule:
 
 ```python
 CHECKS = [check_elements, check_fragments, check_charge, check_stereo, check_size]
@@ -574,7 +680,8 @@ salt, and also too small for this library. A chemist fixing the record at its so
 Now the whole library. Each record gets its issues, its codes and its verdict, in new columns
 beside the original data, so nothing about the record is lost. This is the step a nightly job
 would run unattended, so it reports with `log`, and the quarantine count is a warning: it is the
-number someone should look at in the morning.
+number someone should look at in the morning. The `assert` line stops the program with an error if
+its condition is False; here it guards against the gate ever losing a record:
 
 ```python
 results = dirty.copy()
@@ -593,7 +700,11 @@ WARNING quarantined 417 records
 
 The assertion is the point of the whole module: every one of the 10,083 records came out, either
 accepted or quarantined. The **quarantine table** has one row per issue, so it can be filtered,
-counted and handed to whoever fixes the source:
+counted and handed to whoever fixes the source. The code is one chain of pandas steps, read from
+top to bottom: keep the quarantined rows; `explode` turns a row with two issues into two rows with
+one issue each; `assign` adds columns for the code, message and action of each issue (each
+`lambda t:` receives the table so far); then the wanted columns are kept, the rows are sorted and
+renumbered:
 
 ```python
 quarantine = (
@@ -658,8 +769,9 @@ damaged library contains none (every salt `add_defects` wrote with this seed is 
 `.Cl`, which is neutral). Those checks are still worth running: the next vendor's file may be
 full of them, and section 3 showed each one working.
 
-Accepted records and the quarantine are written out side by side. The issues are stored as their
-codes and messages, plain text that any tool can read:
+Accepted records and the quarantine are written out side by side, as Parquet files (Module 3) in
+the `work` folder. The issues are stored as their codes and messages, plain text that any tool can
+read:
 
 ```python
 accepted = results[results["verdict"] == "accept"].drop(columns=["issues"])
@@ -684,7 +796,9 @@ Every check so far looks at one record at a time. A duplicate is different: it i
 record whose molecule is already in the table, so no record-level check can see it. It takes a
 check across records, on identity. As in Module 3, the InChIKey is the identity: two records with
 the same key are the same molecule, however their SMILES are written. We keep the first record (by
-id) and flag the rest, with a pointer to the record they repeat:
+id) and flag the rest, with a pointer to the record they repeat. After sorting by id,
+`groupby("inchikey")["id"].transform("first")` gives every row the id of the first record with
+the same InChIKey; a row whose own id is different is a repeat:
 
 ```python
 readable = results[results["verdict"] == "accept"].copy()
@@ -718,7 +832,11 @@ those after standardisation.
 
 A validator is software, and software is tested. Because `chemlib` recorded every fault it made,
 we can compare the validator's verdicts with the truth. A **confusion table** puts the true fault in
-the rows and the verdict in the columns:
+the rows and the verdict in the columns, and counts the records in each cell; pandas makes one with
+`pd.crosstab`. First we add an outcome column that marks the duplicates found in section 5:
+`isin` tests whether each id is in the list of repeats, and `.where(~flag, "accept, duplicate")`
+keeps the verdict where the flag is False (`~` means "not") and writes the new label where it is
+True:
 
 ```python
 results["duplicate flag"] = results["id"].isin(repeats["id"])
@@ -747,10 +865,13 @@ disagreement between a validator and a "truth" is investigated, never just count
 
 A perfect score on faults we planted ourselves proves less than it seems. The validator was written
 knowing what `add_defects` does; a new source will bring faults nobody planned for. The table is a
-regression test: it must stay perfect when the code changes.
+**regression test**, a test that checks a change to the code has not broken something that used to
+work: it must stay perfect when the code changes.
 
 Which reason codes did each kind of fault produce? This is where a validator's behaviour is
-understood, not just scored:
+understood, not just scored. The `codes` column holds the codes of a record joined by `;`, so we
+split them and `explode` them into one row per code, then line each code up with its record's
+fault:
 
 ```python
 quarantined = results[results["verdict"] == "quarantine"]
@@ -778,16 +899,18 @@ warning, because no further checks can run on a molecule that cannot be read.
 ## 7. From a lesson to a pipeline
 
 The gate here checks 10,083 records in about a quarter of a minute on a laptop, one record at a
-time. The same two functions scale to millions: run them on batches from `chemlib.stream` (or
-chunks of a file), write each batch's accepted records and quarantine to Parquet, and spread
-batches over processes (Module 9). Keep the reason codes
-stable, because dashboards and alerts count them (Module 14), and record the validator's version
-with its output, so a record quarantined last month can be explained today (Module 13).
+time. The same two functions scale to millions: run them on **batches** (a few thousand records at a
+time) from `chemlib.stream` (or chunks of a file), write each batch's accepted records and
+quarantine to Parquet, and spread batches over several processes, which lets a computer use all
+its processor cores at once (Module 9). Keep the reason codes stable, because dashboards and
+alerts count them (Module 14), and record the validator's version with its output, so a record
+quarantined last month can be explained today (Module 13).
 
 The ChEMBL database has curated its structures with an open-source pipeline built on RDKit since
 release 26, the ChEMBL Structure Pipeline (Bento et al., 2020). Its checker returns for each issue a description and
 a penalty score from 0 to 9 that reflects how serious it is, the same idea as our code, message and
-action. Module 12 returns to validation for whole records and tables, with Pydantic and Pandera.
+action. Module 12 returns to validation for whole records and tables, with Pydantic and Pandera,
+two Python packages for checking data.
 
 ## Try it yourself
 

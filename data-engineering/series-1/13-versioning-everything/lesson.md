@@ -12,29 +12,68 @@ read from, the **rules** that standardised the molecules, and the **data** itsel
 them has changed since and nobody recorded which version was used, the number cannot be checked,
 and an argument about whether 7.2 or 7.0 is right has nothing to stand on.
 
-Data engineers solve this by versioning all five and writing, next to every result, a small
-record of which versions made it. This module does each in turn, by hand first, then with the
-tool industry uses for it.
+Data engineers solve this by **versioning** all five (keeping every version, each with a name, so
+any one can be brought back) and writing, next to every result, a small record of which versions
+made it. This module does each in turn, by hand first, then with the tool industry uses for it.
+
+Much of it rests on one idea, the **hash**. A hash function such as SHA-256 reads any amount of
+data (a file, a text, a whole folder) and gives back a short fixed-length code, its fingerprint:
+SHA-256 gives 64 characters from `0`-`9` and `a`-`f` (hexadecimal, counting in sixteens). Change
+one byte of the data and the hash is completely different, so two things with the same hash have,
+for any practical purpose, the same contents. A hash is therefore a name for exact contents.
 
 By the end of this module you will be able to:
 
-- tag a version of your code with git and read back which version produced a result;
-- lock an environment with uv, record package versions at run time, and pin a container image;
-- change a database schema with numbered migrations that apply once and in order;
-- give standardisation rules a version and a hash that catches unrecorded changes;
-- hash data files, keep a manifest, and version large data with DVC;
-- write a provenance record next to every result, and check it later.
+- save versions of your code with Git, give the important ones a name, and read back which
+  version produced a result;
+- fix the exact package versions a project uses (a lock file, with uv), record the versions that
+  were really installed when a result was made, and see how a Docker image fixes the rest;
+- change a database's tables with numbered files (migrations) that are applied once each, in
+  order;
+- give standardisation rules a version number and a hash, so that a change nobody recorded is
+  caught;
+- record the hash of every data file in a list (a manifest), and, in an optional part, keep
+  versions of large data files with DVC;
+- write a record of everything that made a result (its provenance) next to the result, and check
+  it later.
 
-Everything here runs on any laptop and in a browser notebook: you need Python, pandas, DuckDB, DVC
-and git (installed with most systems and in Colab).
+From earlier modules we use standardisation rules ([Module 7](../07-standardisation/)),
+idempotent steps, which give the same result however many times they run
+([Module 10](../10-pipelines-that-survive-failure/)), and database tables in DuckDB and Docker,
+from Module 4. [Module 12](../12-validating-data/) gave its data contract a version number in the
+same way as we version code here.
+
+The lesson uses these tools:
+
+- **Git**, the program that keeps the history of a folder of files; the Start here page shows how
+  to install it on your own computer, and Colab already has it;
+- **uv**, the tool that installs Python packages at exact versions (the course's own tests use
+  it);
+- **Docker**, which runs programs in a packaged form that works the same on every computer (only
+  described here, not run);
+- **DVC** (Data Version Control), which keeps versions of large data files; the lesson's first
+  cell installs it;
+- **pandas** for tables, **DuckDB** for the database of section 3, and **chemlib**, the course's
+  package that makes a teaching library of molecules.
+
+The code runs in a browser notebook (Google Colab) or on any laptop. Where the lesson shows a
+command to type in a terminal, it says where, and whether it works in Colab.
 
 ![What gets versioned and how the pieces connect: a git commit pins the code and, because they are files in the repository, the lock file, the migrations, the rules and the small .dvc files that point at the data by hash; the image digest pins the operating system; a provenance record next to each result names all of them](figures/what-gets-versioned.svg)
 
 ## Setup
 
 Everything this lesson needs is imported and set here, so the settings can be changed in one
-place. Pipeline steps report with `log`; `print` is kept for showing you results; Module 1
-explains why.
+place. Pipeline steps report with `log`; `print` is kept for showing you results;
+[Module 1](../01-graphs-and-matrices/) explains why.
+
+Besides pandas, DuckDB and chemlib, the block imports tools that come with Python itself:
+`hashlib`, for hashes; `subprocess`, which runs another program (here Git and DVC) from Python and
+collects what it prints; `os`, `shutil` and `stat`, for deleting folders and files; `platform`,
+`sys` and `metadata`, which tell us the Python and package versions; `re`, for regular expressions
+(patterns that match pieces of text); `datetime`, for the time a result was made; `json`, for
+writing dictionaries to text files; `Path`, for file names; and `Callable`, used in a type hint
+(the notes after a colon or `->` that say what kind of value a function takes or returns).
 
 ```python
 import hashlib
@@ -90,14 +129,28 @@ WORK.mkdir(exist_ok=True)
 
 ## 1. Code: commits and tags
 
-Git records every version of a project as a **commit**, named by a hash of its contents and
+Git keeps the history of a folder of files. A folder that Git looks after is a **repository**
+(often shortened to repo); the course's own files are one, on GitHub. Saving a version takes two
+steps: `git add` picks the files to include, and `git commit` saves them, with a short message
+saying what changed. Each saved version is a **commit**, named by a hash of its contents and
 history, so a commit can never be changed without getting a new name. A **tag** is a readable
 name for one commit, such as `v1.0.0`, used for versions that matter: a release, the code behind
 a paper.
 
-We run git from Python, in a small repository under `work/`, so the lesson runs the same way on
-every computer. The helper gives git a name and e-mail for the commits, so it does not depend on
-how git is set up on your machine:
+Normally you type Git commands in a terminal, inside the repository's folder: `git commit -m
+"Convert activities to nM"`, for example. So that the lesson runs the same way on every computer,
+in Colab too, we run Git from Python instead, in a small repository under `work/`. Our helper
+`git(REPO, "commit", "-m", "Convert activities to nM")` does exactly what typing `git commit -m
+"Convert activities to nM"` in the folder `REPO` would do, and returns what Git prints. In its
+first line, `*args` collects all the words after `repo` into one tuple, however many there are;
+`[..., *args]` then puts them back into the command, and `subprocess.run` runs it. The helper
+also gives Git a name and e-mail for the commits, so it does not depend on how Git is set up on
+your machine.
+
+The first helper, `remove_tree`, only deletes a folder left over from an earlier run (with a
+workaround for files that Git makes read-only on Windows); you can read past it. In the rest of
+the code, `git init` makes an empty repository (its main line of history is called `main`), and
+`--quiet` stops Git from printing progress messages:
 
 ```python
 def remove_tree(path: Path) -> None:
@@ -154,7 +207,11 @@ after an edit: v1.0.0-dirty
 
 A result made by "dirty" code cannot be rebuilt: the code that made it exists only until the next
 edit. A careful pipeline refuses to write results from dirty code, or at least says so loudly in
-every result it writes. Commit the change, and the name says how far the code is from the tag:
+every result it writes. Commit the change, and the name says how far the code is from the tag.
+(`commit -am` adds every file Git already knows and commits it in one step; `rev-parse HEAD` prints
+the full name of the latest commit, which Git calls `HEAD`; and `re.sub` replaces the part of the
+name that differs on every computer with `<commit>`, so the output below is the same for
+everyone.)
 
 ```python
 git(REPO, "commit", "--quiet", "-am", "Accept µM and mM")
@@ -184,10 +241,14 @@ versioned too, in three layers.
 
 ### Lock files
 
-`pyproject.toml` says what a project needs, usually as ranges (`rdkit>=2024.9`). A **lock file**
-says exactly what was installed: every package, including the ones nobody asked for directly, at
-one version, with the hash of every file that may be downloaded. This course's own environment is
-locked in `uv.lock`; here is part of its entry for RDKit:
+A Python project usually has a file called `pyproject.toml` that says what the project needs,
+usually as ranges (`rdkit>=2024.9`, "RDKit 2024.9 or newer"). A **lock file** says exactly what was
+installed: every package, including the ones nobody asked for directly (the packages that RDKit
+itself needs, for example), at one version, with the hash of every file that may be downloaded.
+This course's own environment is locked in `uv.lock`, in the Series 1 folder; here is part of its
+entry for RDKit. It is written in TOML, a plain-text settings format: `[[package]]` starts one
+package's entry, and each **wheel** is a ready-built package file for one operating system and
+Python version, downloaded from PyPI, the public index of Python packages:
 
 ```toml
 [[package]]
@@ -207,20 +268,33 @@ wheels = [
 `uv lock` writes the lock file from `pyproject.toml`; `uv sync --locked` installs exactly what it
 says, and fails if the lock file no longer matches the project, instead of quietly installing
 something newer. The lock file is committed with the code, so a commit pins the environment too.
-With pip, the nearest equivalent is a requirements file with every version pinned and
+With pip (Python's standard installer, which Colab uses), the nearest equivalent is a
+requirements file (a list of packages, one per line) with every version pinned and
 `--require-hashes`.
+
+These two commands are typed in a terminal on your own computer, in the folder that holds
+`pyproject.toml` (for the course, `monstrous-learn/data-engineering/series-1`, as on the Start
+here page). They are not needed in Colab, which installs packages with pip. Everything after a
+`#` is a comment, not part of the command:
 
 ```bash
 uv lock            # resolve pyproject.toml into uv.lock
 uv sync --locked   # install exactly uv.lock, or fail if it is out of date
 ```
 
+`uv lock` prints a line such as `Resolved 147 packages in 2ms`. `uv sync --locked` installs what
+is missing and says how many packages it checked or installed; if `pyproject.toml` has changed
+since the lock file was written, it stops with an error saying that the lock file needs to be
+updated, and installs nothing.
+
 ### Recording versions at run time
 
 A lock file says what *should* be installed. What *was* installed when a result was made is
 another question (someone ran `pip install --upgrade` in the environment last week), so a
 pipeline records it while it runs, with `importlib.metadata` from the standard library
-(imported in the Setup block):
+(imported in the Setup block). `metadata.version("pandas")` gives the installed version of pandas,
+and `metadata.distributions()` lists every installed package. In the dictionary that
+`environment` returns, `**{...}` adds the entries of a second dictionary, one per package:
 
 ```python
 def environment(packages: list[str]) -> dict[str, str]:
@@ -249,8 +323,16 @@ Your versions will differ from these, which is the point: without the record nob
 
 ### Container images: tags and digests
 
-The lock file pins Python packages, but not Python itself, nor the operating system libraries
-under it. A container image pins all of it. A `Dockerfile` describes the image:
+*This part has no code to run: it describes Docker, which needs your own computer, and nothing in
+Colab uses it.*
+
+The lock file pins Python packages (fixes them at one version), but not Python itself, nor the
+operating system libraries under it. A container image pins all of it. An **image** is Docker's
+packaged form of a program: a small operating system (usually a Linux such as Debian), Python and
+the packages, frozen together; a **container** is a running copy of an image. Module 4 runs its
+database this way. A `Dockerfile` is the recipe for an image, one step per line: `FROM` names the
+image to start from, `RUN` runs a command while building, `WORKDIR` picks the folder to work in,
+`COPY` copies the project's files in, and `CMD` is the command the container runs when it starts:
 
 ```dockerfile
 FROM python:3.12-slim@sha256:<the digest of the exact image>
@@ -266,22 +348,45 @@ The first line is the one that matters here. `python:3.12-slim` is a **tag**: a 
 image's publisher moves to a new image whenever Python 3.12 gets a patch release or Debian a
 security fix. Building the same Dockerfile next month can give a different image. The **digest**
 after `@sha256:` is a hash of the image's contents, like a commit hash: it can only ever mean one
-image. `docker images --digests` shows the digest of an image you have, and `docker pull
-python@sha256:…` fetches exactly that image again. Pin by digest for anything a result depends
-on, and update the digest on purpose, in a commit, like any other version. (The databases this
-course runs in Docker are pinned to exact release tags; a digest would pin them further.)
+image.
+
+Two Docker commands use digests. They are typed in a terminal on a computer with Docker installed
+(the database guide linked from Module 4 shows how), in any folder; they do not work in Colab.
+`docker images --digests` prints a table of the images you have, one per line, with columns
+`REPOSITORY`, `TAG`, `DIGEST` (the `sha256:...` code), `IMAGE ID`, `CREATED` and `SIZE`.
+`docker pull python@sha256:…` (with the full digest in place of `…`) downloads exactly that image
+again, and prints its digest when it finishes.
+
+Pin by digest for anything a result depends on, and update the digest on purpose, in a commit,
+like any other version. (The databases this course runs in Docker are pinned to exact release
+tags; a digest would pin them further.)
 
 ## 3. Database schemas: numbered migrations
 
 A database's schema (its tables, columns and constraints) changes as a project grows: a column for
-pChEMBL is added, an index is built, a table is split. If those changes are made by hand at a
-database prompt, nobody knows which version of the schema a database has, and a new copy of the
-database cannot be made the same way.
+pChEMBL is added, an index is built, a table is split. If those changes are made by hand, typed
+one at a time into the database, nobody knows which version of the schema a database has, and a
+new copy of the database cannot be made the same way.
 
-**Migrations** fix this. Each change is a numbered SQL file, committed with the code, applied in
-order, and recorded in a table in the database itself. Applying them is then idempotent (Module
-10): running it again applies only what is new. Tools such as Alembic, Flyway and Liquibase do
-this for large projects; the idea fits in one function.
+**Migrations** fix this. Each change is a numbered SQL file (SQL is the language databases are
+given instructions in, as in Module 4), committed with the code, applied in order, and recorded in
+a table in the database itself. Applying them is then idempotent: running it again applies only
+what is new. Tools such as Alembic, Flyway and Liquibase do this for large projects; the idea fits
+in one function.
+
+The SQL in our three files reads almost as English. `CREATE TABLE` makes a table with the columns
+listed (`TEXT` for text, `DOUBLE` for numbers with decimals); `PRIMARY KEY` marks the column that
+names each row, so no two rows can share it; `NOT NULL` means the column may not be empty;
+`REFERENCES compounds (compound_id)` says that every value must exist in the compounds table (a
+foreign key); `CHECK (value_nm > 0)` is a rule the database enforces; and `ALTER TABLE ... ADD
+COLUMN` adds a column to a table that already exists.
+
+`migrate` keeps its record in a table called `schema_migrations`: one row per migration applied,
+with its number, its file name and the hash of its text. It applies each new file inside a
+**transaction**: the database either makes all of the changes between `BEGIN TRANSACTION` and
+`COMMIT`, or, if anything fails, `ROLLBACK` undoes them all, so a migration is never left half
+done. The `with duckdb.connect(...) as db:` block at the end opens the database file and closes it
+again when the block ends, even if something in it fails:
 
 ```python
 def sha256_text(text: str) -> str:
@@ -366,7 +471,11 @@ schema version: 3
 ```
 
 The second run changes nothing, so the same command is safe to run every time the pipeline
-starts. A new change is a new file with the next number; it is the only one applied:
+starts. A new change is a new file with the next number; it is the only one applied. This one
+builds an **index**, a sorted list the database keeps so that it can find a compound's rows
+without reading the whole table (like the index of a book). Afterwards we ask the database for the
+columns of `measurements`, from `information_schema.columns`, a table every SQL database keeps
+about its own tables:
 
 ```python
 (MIGRATIONS / "0004_index_measurements_by_compound.sql").write_text(
@@ -386,9 +495,10 @@ INFO applied 0004_index_measurements_by_compound.sql
 measurements: ['measurement_id', 'compound_id', 'target_id', 'value_nm', 'pchembl']
 ```
 
-An applied migration is never edited: other copies of the database (a colleague's, the
-production server's) have already run the old text, and editing it would leave them different
-with no record of how. The hash in `schema_migrations` catches it:
+An applied migration is never edited: other copies of the database (a colleague's, or the one
+the team's real pipeline uses) have already run the old text, and editing it would leave them
+different with no record of how. The hash in `schema_migrations` catches it. Here we edit the
+first file (the InChIKey may now be empty), try to migrate, and then put the file back as it was:
 
 ```python
 first = MIGRATIONS / "0001_create_compounds.sql"
@@ -409,13 +519,17 @@ To change a column that already exists, write a new migration that changes it.
 
 ## 4. Standardisation rules: a version and a hash
 
-Module 7 wrote standardisation as a function driven by rules: which fragments to strip, whether
-to neutralise, which tautomer to choose. Change a rule and the same input gives different
-molecules, so the rules are versioned like code. A version string is for people; a **hash** of
-the rules is for machines, and catches the change someone made without raising the version.
+[Module 7](../07-standardisation/) wrote standardisation as a function driven by rules: which
+fragments to strip, whether to neutralise, which tautomer to choose. Change a rule and the same
+input gives different molecules, so the rules are versioned like code. A version string is for
+people; a **hash** of the rules is for machines, and catches the change someone made without
+raising the version.
 
 The hash must not depend on how the rules happen to be written down, so it is taken over a
-canonical form: JSON with sorted keys and no spaces.
+canonical form (one fixed way of writing them): JSON, the plain-text format for dictionaries and
+lists, with the keys in alphabetical order and no spaces. To show that the order does not matter,
+the code also writes the same rules in reverse order (`reversed`) and compares the hashes. `[:16]`
+prints only the first 16 characters of a hash, which is enough to tell hashes apart by eye.
 
 ```python
 RULES = {
@@ -442,7 +556,9 @@ same rules written in another order, same hash: True
 ```
 
 A pipeline keeps a register of the versions it has released and their hashes, and checks the
-rules against it before it runs:
+rules against it before it runs. The last two lines try two kinds of change: one rule changed
+with the version left alone, and the same change under a new version that was never released
+(`{**RULES, "canonical_tautomer": True}` is a copy of `RULES` with that one entry changed):
 
 ```python
 RELEASED_RULES = {"2.1.0": rules_hash(RULES)}
@@ -475,7 +591,12 @@ files with the same hash have, for any practical purpose, the same contents. So 
 report becomes a list of files and their hashes: a **manifest**.
 
 We write two data files from `chemlib`. Large files are hashed in chunks, so the whole file is
-never in memory at once:
+never in memory at once. In `file_sha256`, `path.open("rb")` opens the file to read its raw bytes,
+inside a `with` block that closes it at the end. The line `while block := handle.read(chunk):`
+reads the next chunk, calls it `block`, and carries on as long as there was something to read
+(`:=` gives a name to a value in the middle of a line). In the printing loop, `:14` pads the file
+name to 14 characters, and `:>8,` puts a number on the right of 8 characters with commas between
+the thousands:
 
 ```python
 remove_tree(DATA)
@@ -514,13 +635,16 @@ compounds.csv   402,818 bytes  sha256 6201fe7ddc7ec6b1...
 prices.csv       18,772 bytes  sha256 f5dbfd2d533fab04...
 ```
 
-The files are written with `\n` line endings on every system, so the bytes, and therefore the
-hashes, are the same on Windows, macOS and Linux; the hashes you get should match these. (Write
+The end of each line in a text file is marked by an invisible character: `\n` on macOS and Linux,
+and two characters, `\r\n`, on Windows. The files are written with `\n` line endings on every
+system, so the bytes, and therefore the hashes, are the same on Windows, macOS and Linux; the
+hashes you get should match these. (Write
 a CSV with the system's own line endings and Windows gives different bytes and a different hash
 for the same table.)
 
 Checking data against its manifest finds any file that changed, went missing or appeared. Here
-one price is corrected, the kind of edit nobody remembers making:
+one price is corrected, the kind of edit nobody remembers making. (In the last lines,
+`next(... for e in manifest if ...)` finds the first manifest entry for `prices.csv`.)
 
 ```python
 def check_manifest(folder: Path, manifest: list[dict]) -> list[str]:
@@ -554,14 +678,23 @@ and is committed with the code, so a commit says exactly which data the code exp
 
 ### Large data: DVC
 
-A manifest says what the data should be, but git cannot hold the data itself once it runs to
-gigabytes, and plain hashes do not say where to fetch a file with a given hash. **DVC** (Data
-Version Control) does both: it keeps the data in a cache and a shared store, outside git, and
-commits to git only a small `.dvc` file holding the data's hash and size. Git then versions the
-pointer, and DVC fetches the data the pointer names.
+*This part is optional: it shows the tool teams use to version large data. If it is too much at
+first, skip to [section 6](#6-results-a-provenance-record-next-to-every-output): nothing later in
+the course depends on it.*
 
-DVC is a command-line tool and works the same on Windows, macOS and Linux. We call it from Python
-in a fresh git repository, in the same way as git:
+A manifest says what the data should be, but Git cannot hold the data itself once it runs to
+gigabytes, and plain hashes do not say where to fetch a file with a given hash. **DVC** (Data
+Version Control) does both: it keeps the data in a **cache** (a hidden folder of copies, inside the
+project) and a shared store, outside Git, and commits to Git only a small `.dvc` file holding the
+data's hash and size. Git then versions this pointer, and DVC fetches the data the pointer names.
+
+DVC is a command-line tool: normally you type its commands in a terminal, inside the project's
+folder, after installing it with `pip install dvc` (or `uv add dvc`). It works the same on
+Windows, macOS and Linux. Here we call it from Python, with a helper like `git`: `dvc(DVC_PROJECT,
+"add", "data/compounds.csv")` does what typing `dvc add data/compounds.csv` in that folder would
+do. We start a fresh Git repository, turn on DVC in it (`dvc init`), copy in the compounds file and
+`dvc add` it. DVC then tells Git to ignore the data file itself, through a file called
+`.gitignore` (a list of files Git should not track):
 
 ```python
 def dvc(repo: Path, *args: str) -> str:
@@ -601,10 +734,11 @@ git ignores the data itself: /compounds.csv
 the md5 is the file's own: True
 ```
 
-The `.dvc` file is all git sees: an MD5 hash (DVC's choice of hash) and a size. For the same
-bytes it is the same on every computer. Now the data is pushed to a **remote**, the shared store
-that the team (or the paper's readers) fetch from. Here the remote is a folder, so the lesson
-needs no account anywhere:
+The `.dvc` file is all Git sees: an MD5 hash (an older, shorter hash than SHA-256, DVC's choice)
+and a size. For the same bytes it is the same on every computer. Now the data is pushed (copied)
+to a **remote**, the shared store that the team (or the paper's readers) fetch from. Here the
+remote is a folder, so the lesson needs no account anywhere. To show that the data can come back,
+we then delete the file and DVC's cache, and `dvc pull` fetches it from the remote:
 
 ```python
 dvc(DVC_PROJECT, "remote", "add", "--default", "store", str(DVC_STORE.resolve()))
@@ -620,13 +754,16 @@ restored from the remote, same bytes: True
 ```
 
 In a real project the remote is cloud storage (Amazon S3, Google Cloud Storage, Azure), a server
-over SSH, or a shared drive, set once with `dvc remote add` and committed in `.dvc/config`. For
-publishing, the usual route is to archive the exact files of a release, with their manifest, in
-a repository such as Zenodo, which gives them a DOI that the paper cites.
+reached over SSH (a secure way of connecting to another computer), or a shared drive, set once with
+`dvc remote add` and committed in `.dvc/config`. For publishing, the usual route is to archive the
+exact files of a release, with their manifest, in a public data archive such as Zenodo, which
+gives them a DOI (a permanent identifier, like a paper's) that the paper cites.
 
 When the data changes, `dvc add` again gives a new hash, and the commit records it. Every earlier
-version can come back: check out the old `.dvc` file with git, and `dvc checkout` puts the
-matching data in place.
+version can come back: check out the old `.dvc` file with Git, and `dvc checkout` puts the
+matching data in place. In the code, `HEAD~1` means "the commit before the latest one", and
+`git checkout HEAD~1 -- data/compounds.csv.dvc` brings back that one file as it was there; the
+last two lines return to the latest version:
 
 ```python
 changed = pd.read_csv(DVC_PROJECT / "data" / "compounds.csv").head(4_000)  # 1,000 withdrawn
@@ -660,8 +797,9 @@ back: 0a2710734954cb22e937671f0a9dad4d 5000 rows
 
 ## 6. Results: a provenance record next to every output
 
-Everything so far gives each ingredient a version. The last step ties them to the result: every
-output is written together with a small **provenance record** that names the code version, the
+Everything so far gives each ingredient a version. The last step ties them to the result.
+**Provenance** means where something came from, as for a painting or a sample in a lab notebook.
+Every output is written together with a small **provenance record** that names the code version, the
 environment, the schema version, the rules and their hash, the hash of every input file, and the
 parameters of the run. With it, a result can be traced to exactly what made it, and checked.
 
@@ -669,7 +807,12 @@ parameters of the run. With it, a result can be traced to exactly what made it, 
 
 The result here is a small one: the median price per vendor of the compounds with at least a
 given amount in stock. The function that writes it writes the record beside it, with the same
-name and `.provenance.json` on the end:
+name and `.provenance.json` on the end. It gathers every piece from the earlier sections: the code
+version from Git (section 1), the package versions (section 2), the schema version (section 3),
+the rules and their hash (section 4) and the hash of each input file (section 5). The time is
+recorded in UTC (Coordinated Universal Time, the same as GMT), so that records made in different
+countries can be compared. In the last lines, `**params` passes the entries of the dictionary
+`params` to the function as named values, so `min_stock_mg=100`:
 
 ```python
 def median_price_by_vendor(compounds: Path, min_stock_mg: int) -> pd.DataFrame:
@@ -820,9 +963,10 @@ record says which data that was; it is simply not the answer for today's data. W
 the two would look the same.
 
 In practice the pipeline writes the record for every output, never a person by hand. Workflow
-tools keep similar records: DVC's own pipelines, for one, write a `dvc.lock` file with the hash
-of every stage's inputs and outputs. A run history (Module 14) can keep these records for every
-run, and the capstone (Module 15) versions its output in the same way.
+tools (programs that run the steps of a pipeline for you) keep similar records: DVC's own
+pipelines, for one, write a `dvc.lock` file with the hash of every stage's inputs and outputs. A
+run history ([Module 14](../14-monitoring-pipelines/)) can keep these records for every run, and
+the capstone ([Module 15](../15-capstone/)) versions its output in the same way.
 
 ## Try it yourself
 
