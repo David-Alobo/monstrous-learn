@@ -65,7 +65,8 @@ def test_every_internal_link_and_asset_exists(site):
     out, pages = site
     for page in pages:
         html = page.read_text(encoding="utf-8")
-        assert "{{" not in html, f"{page}: a template slot was not filled"
+        # an unfilled slot of the page template looks like {{title}}; lessons may show "{{" in code
+        assert not re.search(r"\{\{[a-z_]+\}\}", html), f"{page}: a template slot was not filled"
         for ref in re.findall(r'(?:href|src)="(/learn/[^"#?]*)', html):
             target = out / ref.lstrip("/")
             if ref.endswith("/"):

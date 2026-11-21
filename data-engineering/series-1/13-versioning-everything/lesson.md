@@ -40,7 +40,7 @@ By the end of this module you will be able to:
 From earlier modules we use standardisation rules ([Module 7](../07-standardisation/)),
 idempotent steps, which give the same result however many times they run
 ([Module 10](../10-pipelines-that-survive-failure/)), and database tables in DuckDB and Docker,
-from Module 4. [Module 12](../12-validating-data/) gave its data contract a version number in the
+from [Module 4](../04-databases-and-schemas/). [Module 12](../12-validating-data/) gave its data contract a version number in the
 same way as we version code here.
 
 The lesson uses these tools:

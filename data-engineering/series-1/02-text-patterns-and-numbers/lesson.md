@@ -329,7 +329,7 @@ methyl salicylate  C(=O)O as a molecule: True   acid SMARTS: False
 ibuprofen          C(=O)O as a molecule: True   acid SMARTS: True
 ```
 
-Methyl salicylate is an ester, not an acid: only the SMARTS gets it right. Module 4 runs the same
+Methyl salicylate is an ester, not an acid: only the SMARTS gets it right. [Module 4](../04-databases-and-schemas/) runs the same
 searches inside the database.
 
 ## 7. Fingerprints: molecules as bits

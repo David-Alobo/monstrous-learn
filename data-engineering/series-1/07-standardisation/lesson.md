@@ -646,7 +646,7 @@ molecules from the ones it duplicated. In a real merge, these joins are where as
 two suppliers meet for the first time.
 
 Finally the table is written out as a Parquet file (Module 3), with its provenance columns, ready
-for loading into a database (Module 4):
+for loading into a database ([Module 4](../04-databases-and-schemas/)):
 
 ```python
 standard_path = WORK / "standardised.parquet"

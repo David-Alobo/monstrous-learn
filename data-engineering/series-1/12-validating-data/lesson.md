@@ -39,7 +39,7 @@ From earlier modules we use the quarantine and the idea of checking against data
 faults ([Module 6](../06-validating-molecules/)), standardisation rules and tests run by pytest
 ([Module 7](../07-standardisation/)), Pydantic models for settings
 ([Module 10](../10-pipelines-that-survive-failure/)), records from a web API
-([Module 11](../11-incremental-ingestion/)), and DuckDB, the database in one file, from Module 4.
+([Module 11](../11-incremental-ingestion/)), and DuckDB, the database in one file, from [Module 4](../04-databases-and-schemas/).
 
 The lesson uses these packages:
 

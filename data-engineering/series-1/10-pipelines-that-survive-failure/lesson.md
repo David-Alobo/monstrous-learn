@@ -37,7 +37,7 @@ By the end of this module you will be able to:
 From earlier modules we use SMILES and RDKit ([Module 1](../01-graphs-and-matrices/),
 [Module 2](../02-text-patterns-and-numbers/)), the course's `chemlib` file, which makes test
 libraries and can add faults to them on purpose ([Module 6](../06-validating-molecules/)), and
-joblib from [Module 9](../09-parallel-and-distributed/). Tables and SQL come from Module 4, but you
+joblib from [Module 9](../09-parallel-and-distributed/). Tables and SQL come from [Module 4](../04-databases-and-schemas/), but you
 do not need it to follow along: every SQL statement here is explained where it appears.
 
 The lesson uses these packages:

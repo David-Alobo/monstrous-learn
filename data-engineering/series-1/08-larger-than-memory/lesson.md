@@ -1182,7 +1182,7 @@ statistics far more useful.
 ## 6. Querying the dataset with DuckDB
 
 **DuckDB** is a database for analysing data that runs inside your Python process, with nothing to
-install or start separately (Module 4 used it on a single table). It reads Parquet files directly,
+install or start separately ([Module 4](../04-databases-and-schemas/) used it on a single table). It reads Parquet files directly,
 and a **glob** (a file pattern with wildcards) such as `work/library/**/*.parquet`, meaning "every
 file ending in `.parquet`, in any sub-folder of `work/library`", together with
 `hive_partitioning = true`, makes the whole folder one table, vendor column included.

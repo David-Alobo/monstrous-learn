@@ -634,7 +634,7 @@ def validate_page(page: dict) -> list[Activity]:
 
 ## 6. Incremental loads with a high-water mark
 
-The data go into DuckDB ([Module 8](../08-larger-than-memory/); Module 4 introduces it with the
+The data go into DuckDB ([Module 8](../08-larger-than-memory/); [Module 4](../04-databases-and-schemas/) introduces it with the
 other databases), in two tables: `activities`, keyed by `activity_id`, and
 `load_state`, one row per source holding its **high-water mark**: the largest `activity_id` loaded
 so far. Each run asks ChEMBL only for activities above the mark (`activity_id__gt`), upserts them,

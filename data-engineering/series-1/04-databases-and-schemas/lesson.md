@@ -127,7 +127,7 @@ different questions:
 | Document | records like JSON, each with its own fields | records whose fields vary | MongoDB, CouchDB | instrument metadata, lab notebook entries |
 | Key-value | a value stored under a key | the fastest possible lookup by one key | Redis | a cache of computed descriptors, by InChIKey |
 | Wide-column | huge tables spread over many machines | very large write volumes, across a cluster | Cassandra, HBase | readings from thousands of instruments |
-| Graph | nodes joined by relationships | following links many steps deep | Neo4j | reaction networks, compound-target-pathway links (Module 5) |
+| Graph | nodes joined by relationships | following links many steps deep | Neo4j | reaction networks, compound-target-pathway links ([Module 5](../05-graphs-and-graph-databases/)) |
 | Vector | lists of numbers (embeddings) | "find the most similar" | pgvector, Milvus, Qdrant | similarity search on learned molecular embeddings |
 
 The first row is the classic **relational database**, questioned in **SQL** (Structured Query

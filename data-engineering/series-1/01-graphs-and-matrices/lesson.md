@@ -125,7 +125,7 @@ rings: [[4, 5, 6, 7, 8, 9]]
 bonds between the two carbonyl carbons: 4
 ```
 
-Graph questions (rings, paths, which atoms are connected) are chemistry questions. Module 5 comes
+Graph questions (rings, paths, which atoms are connected) are chemistry questions. [Module 5](../05-graphs-and-graph-databases/) comes
 back to this when we store molecules in a graph database.
 
 ## 2. Molecules as matrices
