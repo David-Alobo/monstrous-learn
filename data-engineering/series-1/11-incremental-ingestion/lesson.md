@@ -423,7 +423,7 @@ size_kib = sum(p.stat().st_size for p in recordings) / 1024
 log.info("%d recorded responses, %.0f KiB in all", len(recordings), size_kib)
 ```
 ```output
-INFO 10 recorded responses, 178 KiB in all
+INFO 10 recorded responses, 171 KiB in all
 ```
 
 Live mode is not a different program: when this module was written, the whole lesson was also run

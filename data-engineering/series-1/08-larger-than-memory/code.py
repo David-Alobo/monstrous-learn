@@ -90,7 +90,7 @@ print(f"the generator can make {chemlib.size():,} molecules; we stream {N_MOLECU
 
 # ---- What one molecule costs ----
 sample = chemlib.library(SAMPLE_SIZE, seed=SEED)
-sample.to_csv(SAMPLE_CSV, index=False)
+sample.to_csv(SAMPLE_CSV, index=False, lineterminator="\n")  # one line ending on every computer
 pq.write_table(pa.Table.from_pandas(sample, preserve_index=False), SAMPLE_PARQUET,
                compression="zstd")
 text_as_objects = sample.astype({"id": object, "smiles": object, "vendor": object})

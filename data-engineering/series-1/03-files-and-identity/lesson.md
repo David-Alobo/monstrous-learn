@@ -155,7 +155,8 @@ A few Python features appear in the code for the first time:
 ```python
 def write_sdf(df: pd.DataFrame, path: Path) -> None:
     """Write a library as SDF: a connection table per molecule, the other columns as data fields."""
-    with Chem.SDWriter(str(path)) as writer:
+    # RDKit writes into a file we open, with one line ending on every computer
+    with path.open("w", encoding="utf-8", newline="\n") as handle, Chem.SDWriter(handle) as writer:
         for row in df.itertuples(index=False):
             mol = Chem.MolFromSmiles(row.smiles)
             mol.SetProp("_Name", row.id)  # the first line of the record
@@ -199,7 +200,7 @@ files = {
 write_sdf(library, files["SDF"])
 files["SDF (gzip)"] = gzip_copy(files["SDF"])
 write_smi(library, files["SMILES"])
-library.to_csv(files["CSV"], index=False)
+library.to_csv(files["CSV"], index=False, lineterminator="\n")  # one line ending on every computer
 table = pa.Table.from_pandas(library, schema=SCHEMA, preserve_index=False)
 pq.write_table(table, files["Parquet"], compression=PARQUET_COMPRESSION)
 
@@ -208,11 +209,11 @@ for name, path in files.items():
     print(f"{name:11} {size / 1e6:6.2f} MB  {size / len(library):6.0f} bytes per molecule")
 ```
 ```output
-SDF          50.19 MB    2510 bytes per molecule
+SDF          48.78 MB    2439 bytes per molecule
 SMILES        1.22 MB      61 bytes per molecule
-CSV           1.63 MB      81 bytes per molecule
+CSV           1.61 MB      80 bytes per molecule
 Parquet       0.42 MB      21 bytes per molecule
-SDF (gzip)    1.72 MB      86 bytes per molecule
+SDF (gzip)    1.69 MB      85 bytes per molecule
 ```
 
 ![Bar chart of the size on disk of the same 20,000 molecules in each format: SDF is far the largest, Parquet the smallest](figures/file-sizes.svg)
@@ -390,7 +391,7 @@ def write_unchecked_sdf(df: pd.DataFrame, path: Path) -> None:
     """Write an SDF without checking valences, as some tools do; skip SMILES that cannot be read."""
     no_valence_check = Chem.SanitizeFlags.SANITIZE_ALL ^ Chem.SanitizeFlags.SANITIZE_PROPERTIES
     written = skipped = 0
-    with Chem.SDWriter(str(path)) as writer:
+    with path.open("w", encoding="utf-8", newline="\n") as handle, Chem.SDWriter(handle) as writer:
         for row in df.itertuples(index=False):
             mol = Chem.MolFromSmiles(row.smiles, sanitize=False)
             if mol is None:

@@ -169,7 +169,7 @@ Arrow reports `nbytes`. `pa.Table.from_pandas` turns a pandas table into an Arro
 
 ```python
 sample = chemlib.library(SAMPLE_SIZE, seed=SEED)
-sample.to_csv(SAMPLE_CSV, index=False)
+sample.to_csv(SAMPLE_CSV, index=False, lineterminator="\n")  # one line ending on every computer
 pq.write_table(pa.Table.from_pandas(sample, preserve_index=False), SAMPLE_PARQUET,
                compression="zstd")
 text_as_objects = sample.astype({"id": object, "smiles": object, "vendor": object})
@@ -185,7 +185,7 @@ for name, size in sizes.items():
     print(f"{name:22}{size / 1e6:6.1f} MB {size / len(sample):6.0f} bytes per molecule")
 ```
 ```output
-CSV file                 1.6 MB     82 bytes per molecule
+CSV file                 1.6 MB     81 bytes per molecule
 Parquet file (zstd)      0.4 MB     21 bytes per molecule
 Arrow table              2.1 MB    107 bytes per molecule
 pandas, Arrow text       2.1 MB    107 bytes per molecule

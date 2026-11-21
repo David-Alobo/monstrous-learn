@@ -1,0 +1,5 @@
+# Linux line endings in every copy of the repository, Windows included, so files are the same
+# size everywhere and every lesson prints the same numbers as its page
+* text=auto eol=lf
+*.png binary
+*.ipynb text eol=lf
