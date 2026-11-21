@@ -19,6 +19,7 @@ _sys.path[:0] = [str(_HERE), str(_HERE.parent)]
 # ---- Setup ----
 import csv
 import logging
+import math
 import re
 import shutil
 import sys
@@ -41,6 +42,8 @@ import pyarrow.dataset as ds
 import pyarrow.parquet as pq
 from rdkit import Chem
 from rdkit.Chem import Descriptors, rdFingerprintGenerator
+from tqdm import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 import chemlib
 
@@ -70,6 +73,7 @@ WATCH_SECONDS = 0.005  # how often the memory watcher looks at the process
 
 N_CHECKED = 100_000  # molecules checked for defects while streaming, in batches of CHECK_BATCH
 CHECK_BATCH = 10_000
+PROGRESS_EVERY = 4  # an unattended job logs its progress every this many batches
 DEFECT_RATE = 0.02  # share of damaged records in a normal delivery
 WORSE_RATE = 0.08  # ... and in the later batches, from a supplier's worse export
 WORSE_FROM = 6  # the first batch (counting from 0) of the worse export
@@ -350,6 +354,26 @@ described = pq.read_table(DESCRIPTORS)
 log.info("wrote %d rows in %d row groups to %s", described.num_rows,
          pq.ParquetFile(DESCRIPTORS).num_row_groups, DESCRIPTORS.as_posix())
 print(described.slice(0, 3).to_pandas().to_string(index=False))
+
+# ---- Showing progress: a bar for people, log lines for jobs ----
+total_rows = 0
+with tqdm(total=N_MOLECULES, unit="mol", unit_scale=True, desc="streaming") as bar:
+    for batch in chemlib.stream(N_MOLECULES, batch=BATCH):
+        total_rows += len(add_columns(batch))
+        bar.update(len(batch))
+n_batches = math.ceil(N_MOLECULES / BATCH)
+done = 0
+for k, batch in enumerate(chemlib.stream(N_MOLECULES, batch=BATCH), start=1):
+    done += len(add_columns(batch))
+    if k % PROGRESS_EVERY == 0 or k == n_batches:
+        log.info("batch %d/%d: %s molecules, %.0f%% done", k, n_batches, f"{done:,}",
+                 100 * done / N_MOLECULES)
+with logging_redirect_tqdm(), tqdm(total=N_MOLECULES, unit="mol", unit_scale=True,
+                                   desc="checking") as bar:
+    for k, batch in enumerate(chemlib.stream(N_MOLECULES, batch=BATCH), start=1):
+        if k == 5:
+            log.warning("batch %d: supplier sent a different column order", k)
+        bar.update(len(batch))
 
 # ---- Smaller numbers, checked ----
 def smallest_int(values: pd.Series) -> pd.Series:

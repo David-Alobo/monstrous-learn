@@ -1,7 +1,7 @@
 ---
 title: Libraries larger than memory
 summary: Stream molecules in batches, write a partitioned Parquet dataset and query it with DuckDB, so a library far larger than memory is processed in a fixed amount of memory.
-requires: pandas, pyarrow, rdkit, numpy, psutil, duckdb
+requires: pandas, pyarrow, rdkit, numpy, psutil, duckdb, tqdm
 ---
 
 Screening libraries are large and getting larger. Make-on-demand catalogues already list tens of
@@ -23,6 +23,8 @@ By the end of this module you will be able to:
   generators and `itertools` to batch, join and group streams;
 - count and summarise a stream as it passes with `Counter`, `defaultdict` and a bounded `deque`,
   without holding the batches;
+- show a long run's progress the right way for its audience: a tqdm bar for a person watching,
+  log lines at a steady pace for an unattended job;
 - shrink a table with compact types: smaller NumPy integers and floats (checked against the data),
   pandas categories and Parquet dictionary encoding;
 - write a partitioned Parquet dataset with an explicit schema, row groups and compression;
@@ -42,6 +44,7 @@ why.
 ```python
 import csv
 import logging
+import math
 import re
 import shutil
 import sys
@@ -64,6 +67,8 @@ import pyarrow.dataset as ds
 import pyarrow.parquet as pq
 from rdkit import Chem
 from rdkit.Chem import Descriptors, rdFingerprintGenerator
+from tqdm import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 import chemlib
 
@@ -93,6 +98,7 @@ WATCH_SECONDS = 0.005  # how often the memory watcher looks at the process
 
 N_CHECKED = 100_000  # molecules checked for defects while streaming, in batches of CHECK_BATCH
 CHECK_BATCH = 10_000
+PROGRESS_EVERY = 4  # an unattended job logs its progress every this many batches
 DEFECT_RATE = 0.02  # share of damaged records in a normal delivery
 WORSE_RATE = 0.08  # ... and in the later batches, from a supplier's worse export
 WORSE_FROM = 6  # the first batch (counting from 0) of the worse export
@@ -170,7 +176,7 @@ print(f"{len(molecules):,} RDKit molecules: about {(after - before) / 1e6:.0f} M
       f"{per_molecule:,.0f} bytes each")
 ```
 ```output varies
-20,000 RDKit molecules: about 642 MB, 32,120 bytes each
+20,000 RDKit molecules: about 643 MB, 32,142 bytes each
 ```
 
 A 2048-bit Morgan fingerprint stored as one byte per bit, the way many machine-learning examples
@@ -248,7 +254,7 @@ for stat in snapshot.statistics("lineno")[:2]:
 ```output
 6,147 cheap records kept
 peak 19.3 MB, still held 1.2 MB
-line 6: 19.2 MB in 200,005 allocations
+line 6: 19.2 MB in 200,004 allocations
 line 7: 0.1 MB in 1 allocations
 ```
 
@@ -542,7 +548,7 @@ for name, peak in peaks.items():
 ```
 ```output varies
 INFO stream           peak     8 MB above the start
-INFO load everything  peak    48 MB above the start
+INFO load everything  peak    44 MB above the start
 ```
 
 Both files hold the same rows; only the memory needed to make them differs:
@@ -696,6 +702,78 @@ ML-01000000     CCc1nc(Nc2ncccc2O)nc(C(C)C)c1CN 287.37  96.95
 ML-01000001 CCc1nc(Nc2ncccc2N(C)C)nc(C(C)C)c1CN 314.44  79.96
 ML-01000002   CCc1nc(Nc2ncccc2C#N)nc(C(C)C)c1CN 296.38 100.51
 ```
+
+### Showing progress: a bar for people, log lines for jobs
+
+A stream of 300,000 molecules takes seconds; the full library, or the RDKit step on millions,
+takes hours, and the first question anyone asks of a long run is "how far has it got?". There are
+two answers, for two audiences.
+
+**A person watching a terminal or a notebook** wants a progress bar: how much is done, how fast it
+is going, and how long is left. `tqdm` is the usual library. It wraps any loop, or, as here, is
+told the total and moved on by each batch's size, so it counts molecules rather than batches:
+
+```python
+total_rows = 0
+with tqdm(total=N_MOLECULES, unit="mol", unit_scale=True, desc="streaming") as bar:
+    for batch in chemlib.stream(N_MOLECULES, batch=BATCH):
+        total_rows += len(add_columns(batch))
+        bar.update(len(batch))
+```
+
+While it runs, the bar redraws itself on one line of the screen, with the rate and the time left,
+and ends as:
+
+```text
+streaming: 100%|██████████| 300k/300k [00:02<00:00, 134kmol/s]
+```
+
+The bar goes to stderr, like log lines, and redraws itself, so the lesson's page cannot show it:
+run the block yourself to see it move. In a notebook, `from tqdm.auto import tqdm` gives a
+graphical bar instead.
+
+**A job running unattended** (in tmux on a server, Module 10, or on a schedule, Module 15) has
+nobody watching. Its progress belongs in the log, as ordinary lines at a steady pace: every few
+batches, with the count, the share done and, in a real job, the rate. A progress bar written to a
+log file is not a bar any more; it is hundreds of half-lines joined by carriage returns.
+
+```python
+n_batches = math.ceil(N_MOLECULES / BATCH)
+done = 0
+for k, batch in enumerate(chemlib.stream(N_MOLECULES, batch=BATCH), start=1):
+    done += len(add_columns(batch))
+    if k % PROGRESS_EVERY == 0 or k == n_batches:
+        log.info("batch %d/%d: %s molecules, %.0f%% done", k, n_batches, f"{done:,}",
+                 100 * done / N_MOLECULES)
+```
+```output
+INFO batch 4/12: 100,000 molecules, 33% done
+INFO batch 8/12: 200,000 molecules, 67% done
+INFO batch 12/12: 300,000 molecules, 100% done
+```
+
+One script can serve both. `tqdm(..., disable=None)` shows the bar only when its output is a
+terminal, so the same code draws a bar on your screen and nothing in `work/run.log`, where the
+progress lines take over. And when a loop with a bar also logs (a warning about a bad batch, say),
+the log line would land in the middle of the bar; `logging_redirect_tqdm` sends log lines through
+tqdm, which prints them above the bar and redraws it underneath:
+
+```python
+with logging_redirect_tqdm(), tqdm(total=N_MOLECULES, unit="mol", unit_scale=True,
+                                   desc="checking") as bar:
+    for k, batch in enumerate(chemlib.stream(N_MOLECULES, batch=BATCH), start=1):
+        if k == 5:
+            log.warning("batch %d: supplier sent a different column order", k)
+        bar.update(len(batch))
+```
+```output
+WARNING batch 5: supplier sent a different column order
+```
+
+Other libraries do the same job. `rich` draws bars too (`rich.progress`) and also makes log lines
+easier to read on screen, in colour, with its `RichHandler`; `alive-progress` and `enlighten` are
+two more bar libraries. Which one you pick matters less than the rule: bars for people, log lines
+for jobs, and never a bar in a log file.
 
 ## 4. Compact types
 
@@ -1086,6 +1164,7 @@ code above. Answers are published after the cohort's deadline.
   `namedtuple`). <https://docs.python.org/3/library/collections.html>
 - The Python documentation. *tracemalloc: trace memory allocations*.
   <https://docs.python.org/3/library/tracemalloc.html>
+- The tqdm documentation. <https://tqdm.github.io/>
 - The Python documentation. *itertools: functions creating iterators for efficient looping*.
   <https://docs.python.org/3/library/itertools.html>
 - The psutil documentation (process memory, used for the measurements here).

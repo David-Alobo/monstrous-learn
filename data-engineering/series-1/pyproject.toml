@@ -24,6 +24,7 @@ dependencies = [
     "matplotlib>=3.9",
     "dvc>=3.50",
     "openbabel-wheel>=3.1",
+    "tqdm>=4.66",
 ]
 
 [dependency-groups]

@@ -21,7 +21,7 @@ uv sync
 uv run python 08-larger-than-memory/code.py
 ```
 
-or with pip only, in any Python 3.11+ environment: `python -m pip install pandas pyarrow rdkit numpy psutil duckdb`.
+or with pip only, in any Python 3.11+ environment: `python -m pip install pandas pyarrow rdkit numpy psutil duckdb tqdm`.
 
 *On Windows*, clone into a short folder (for example `C:\code`): Windows limits paths to 260 characters unless [long paths are enabled](https://learn.microsoft.com/windows/win32/fileio/maximum-file-path-limitation), and some packages install deep inside the environment.
 

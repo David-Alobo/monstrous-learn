@@ -2036,6 +2036,7 @@ dependencies = [
     { name = "rdkit" },
     { name = "requests" },
     { name = "tenacity" },
+    { name = "tqdm" },
 ]
 
 [package.dev-dependencies]
@@ -2066,6 +2067,7 @@ requires-dist = [
     { name = "rdkit", specifier = ">=2024.9" },
     { name = "requests", specifier = ">=2.32" },
     { name = "tenacity", specifier = ">=9.0" },
+    { name = "tqdm", specifier = ">=4.66" },
 ]
 
 [package.metadata.requires-dev]
