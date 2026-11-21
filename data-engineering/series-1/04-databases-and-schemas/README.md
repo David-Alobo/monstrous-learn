@@ -28,7 +28,7 @@ uv sync
 uv run python 04-databases-and-schemas/code.py
 ```
 
-or, in any Python 3.11+ environment: `python -m pip install rdkit pandas numpy duckdb psycopg[binary]`.
+or, in any Python 3.11+ environment: `python -m pip install rdkit pandas numpy duckdb psycopg[binary] python-dotenv`.
 
 **This lesson also needs PostgreSQL**, a database that runs in Docker on your own computer (Colab cannot run it; the rest of the lesson runs there). [The database guide](https://monstrous.com.ng/learn/databases/) shows how to install Docker and start it, step by step.
 

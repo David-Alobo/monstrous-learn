@@ -24,6 +24,7 @@ from pathlib import Path
 import duckdb
 import networkx as nx
 import pandas as pd
+from dotenv import find_dotenv, load_dotenv
 from networkx.algorithms import isomorphism
 from neo4j import GraphDatabase
 from neo4j.exceptions import ConstraintError
@@ -44,7 +45,11 @@ METHYL_SALICYLATE = "COC(=O)c1ccccc1O"
 SALICYLIC_ACID = "OC(=O)c1ccccc1O"
 MCS_TIMEOUT_S = 10  # give up the common-substructure search after this many seconds
 
-# Neo4j (sections 3 to 6): where it is and how to log in come from the environment
+# Neo4j (sections 3 to 6): where it is and how to log in
+# passwords and addresses: from the environment, or from the course's .env file (copied from
+# .env.example at the repository's root); find_dotenv looks for it in this folder and the ones
+# above, and settings already in the environment are kept
+load_dotenv(find_dotenv(usecwd=True))
 NEO4J_URI = os.environ.get("NEO4J_URI", "")
 NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "")

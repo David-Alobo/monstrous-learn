@@ -1,25 +1,23 @@
 # The databases the courses use, the same on Windows, macOS and Linux. How to install Docker and
-# what to do when something goes wrong: README.md next to this file. From the repository's root:
+# what to do when something goes wrong: README.md next to this file.
 #
-#   docker compose -f shared/docker/compose.yml up -d postgres neo4j   # start
-#   docker compose -f shared/docker/compose.yml down                    # stop (data is kept)
-#   docker compose -f shared/docker/compose.yml down -v                 # stop and delete the data
+# Passwords live in the file .env at the repository's root (copy .env.example and choose your
+# own), never in this file. From the repository's root:
 #
-# Then tell the lessons where they are (the defaults below), e.g. in a terminal:
-#   DATABASE_URL=postgresql://learn:learn@localhost:5432/chem
-#   NEO4J_URI=bolt://localhost:7687   NEO4J_USER=neo4j   NEO4J_PASSWORD=learn-neo4j
+#   docker compose --env-file .env -f shared/docker/compose.yml up -d postgres neo4j   # start
+#   docker compose --env-file .env -f shared/docker/compose.yml down                   # stop (data kept)
+#   docker compose --env-file .env -f shared/docker/compose.yml down -v                # stop, delete data
 #
 # Images are pinned to exact versions, so every learner gets the same database.
-# These passwords are for a database on your own computer only: never reuse them anywhere else.
 services:
   postgres:
     # PostgreSQL 17 with the RDKit cartridge (https://github.com/InformaticsMatters/docker-rdkit)
     image: informaticsmatters/rdkit-cartridge-debian:Release_2026_09_1
     restart: unless-stopped  # back whenever Docker starts, until you stop it
     environment:
-      POSTGRES_USER: learn
-      POSTGRES_PASSWORD: learn
-      POSTGRES_DB: chem
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
       # UTF-8 text; without it this image creates the database as SQL_ASCII, and Python then
       # receives every text value as bytes (b'...')
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C.UTF-8"
@@ -30,7 +28,7 @@ services:
       - postgres-data:/var/lib/postgresql/data
       - ./postgres-init:/docker-entrypoint-initdb.d:ro  # creates the rdkit extension on first start
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U learn -d chem"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       retries: 20
 
@@ -39,7 +37,7 @@ services:
     image: neo4j:5.26-community
     restart: unless-stopped
     environment:
-      NEO4J_AUTH: neo4j/learn-neo4j
+      NEO4J_AUTH: ${NEO4J_USER:?set NEO4J_USER in .env}/${NEO4J_PASSWORD:?set NEO4J_PASSWORD in .env}
     ports:
       - "127.0.0.1:7474:7474"  # the browser interface: http://localhost:7474
       - "[::1]:7474:7474"

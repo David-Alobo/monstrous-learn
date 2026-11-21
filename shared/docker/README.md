@@ -114,17 +114,54 @@ in your Ubuntu home folder. Files under `/mnt/c/...` (your Windows drive) also w
 to read from Linux. Windows Explorer shows your Ubuntu files under **Linux** in its left-hand pane,
 and VS Code opens them with its **WSL** extension.
 
-## 2. Start the databases
+## 2. Choose your passwords: the `.env` file
+
+A database server only answers someone who logs in, with a user name and a password. Passwords
+never go in code or in files that Git stores (Module 4 explains why), so the course keeps them in a
+file called **`.env`**, at the repository's root, that only you have. The repository holds a
+template, `.env.example`, with every setting the course needs and a placeholder for each password.
+Make your own copy once. In the terminal, from the repository's root:
+
+| macOS, Linux, WSL | Windows (PowerShell) |
+|---|---|
+| `cp .env.example .env` | `Copy-Item .env.example .env` |
+
+Then open `.env` in a text editor and replace each `change-me-...` with a password of your own
+(letters and digits, at least 8 characters, different from any password you use elsewhere): in
+WSL or Linux type `nano .env` (save with Ctrl+O then Enter, leave with Ctrl+X); on Windows,
+`notepad .env`; on macOS, `open -e .env`. It looks like this, with your passwords in place of the
+placeholders:
+
+```ini
+POSTGRES_USER=learn
+POSTGRES_PASSWORD=change-me-postgres
+POSTGRES_DB=chem
+DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB}
+ANALYST_PASSWORD=change-me-analyst
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=change-me-neo4j
+NEO4J_URI=bolt://localhost:7687
+```
+
+Each line is one setting, `NAME=value`. `DATABASE_URL` is the address the lessons use for
+PostgreSQL, built from the lines above it (`${POSTGRES_PASSWORD}` means "the value of
+`POSTGRES_PASSWORD`"), so each password is written only once. The repository's `.gitignore` file
+lists `.env`, so Git never stores it: never remove it from that list, and never share the file.
+(Files whose names start with a dot are hidden in most file browsers; the terminal's `ls -a` shows
+them.)
+
+## 3. Start the databases
 
 In the terminal, from the repository's root:
 
 ```bash
-docker compose -f shared/docker/compose.yml up -d postgres neo4j
+docker compose --env-file .env -f shared/docker/compose.yml up -d postgres neo4j
 ```
 
-`up` starts the containers, `-d` leaves them running in the background, and `-f` says which
-Compose file to use. The first time, Docker downloads the two images (about 1 GB in all), which
-takes a few minutes and prints download progress. It ends with:
+`up` starts the containers, `-d` leaves them running in the background, `--env-file .env` gives
+Docker your passwords, and `-f` says which Compose file to use. The first time, Docker downloads
+the two images (about 1 GB in all), which takes a few minutes and prints download progress. It
+ends with:
 
 ```text
  Container docker-postgres-1  Started
@@ -134,32 +171,29 @@ takes a few minutes and prints download progress. It ends with:
 Wait about 30 seconds for the databases to finish starting inside their containers, then check:
 
 ```bash
-docker compose -f shared/docker/compose.yml ps
+docker compose --env-file .env -f shared/docker/compose.yml ps
 ```
 
 Both lines should say `Up`, and PostgreSQL's also `(healthy)`, meaning it answers queries. Neo4j
 has no health check, so it only says `Up`.
 
-## 3. The user names and passwords
+The passwords count from the first start: both databases set them only when their data is created.
+To change a password later, change it in `.env`, delete the old data (`down -v`, in section 7) and
+start again.
 
-A database server only answers someone who logs in, with a user name and a password. The course's
-are set in `shared/docker/compose.yml` (the lines `POSTGRES_USER`, `POSTGRES_PASSWORD` and
-`NEO4J_AUTH`), so every learner has the same ones:
+## 4. Where the databases are, and who can log in
 
 | Database | Address | User name | Password | Database name |
 |---|---|---|---|---|
-| PostgreSQL | `localhost`, port `5432` | `learn` | `learn` | `chem` |
-| Neo4j | `localhost`, ports `7474` (browser) and `7687` (Python) | `neo4j` | `learn-neo4j` | (the default) |
+| PostgreSQL | `localhost`, port `5432` | `POSTGRES_USER` in your `.env` (`learn`) | `POSTGRES_PASSWORD` in your `.env` | `chem` |
+| Neo4j | `localhost`, ports `7474` (browser) and `7687` (Python) | `neo4j` | `NEO4J_PASSWORD` in your `.env` | (the default) |
 
-They are simple on purpose, and safe only because these databases can be reached from your own
-computer and nowhere else: `compose.yml` opens their ports only on `127.0.0.1` and `::1`, the two
-addresses (IPv4 and IPv6) that mean `localhost`, and not to the network. A database on a server or a virtual machine needs real passwords, kept out
-of the code; Module 4 shows how. Never reuse these passwords anywhere else.
+These databases can be reached from your own computer and nowhere else: `compose.yml` opens their
+ports only on `127.0.0.1` and `::1`, the two addresses (IPv4 and IPv6) that mean `localhost`, and
+not to the network. A database on a server or a virtual machine also needs long random passwords,
+kept by whoever runs it.
 
-To change them, edit those lines in `compose.yml`, then delete the old data (`down -v`, in
-section 6) and start again: both databases set their password only the first time they start.
-
-## 4. Look inside the databases
+## 5. Look inside the databases
 
 ### Neo4j, in your web browser
 
@@ -169,7 +203,7 @@ Neo4j comes with a web page for looking at the graph and typing queries.
    bar, where you would type a website's name).
 2. You see a form called **Connect to instance**. Leave **Protocol** (`neo4j://`) and
    **Connection URL** (`localhost:7687`) as they are. **Database user** already says `neo4j`.
-   Click in **Password**, type `learn-neo4j`, and click **Connect**.
+   Click in **Password**, type your `NEO4J_PASSWORD` from `.env`, and click **Connect**.
 
    ![The "Connect to instance" form: Protocol neo4j://, Connection URL localhost:7687, Database user neo4j, an empty Password box and a Connect button](images/neo4j-connect.png)
 
@@ -195,12 +229,13 @@ PostgreSQL comes with `psql`, a program for typing SQL. It is already inside the
 nothing needs installing. From the repository's root:
 
 ```bash
-docker compose -f shared/docker/compose.yml exec postgres psql -U learn -d chem
+docker compose --env-file .env -f shared/docker/compose.yml exec postgres psql -U learn -d chem
 ```
 
 `exec postgres` runs a command inside the running `postgres` container; `-U learn -d chem` logs in
-as user `learn` to the database `chem` (inside the container no password is asked). The prompt
-changes to `chem=#`. Type this query, ending with a semicolon, and press Enter:
+as user `learn` to the database `chem` (use your `POSTGRES_USER` and `POSTGRES_DB` if you changed
+them; inside the container no password is asked). The prompt changes to `chem=#`. Type this query,
+ending with a semicolon, and press Enter:
 
 ```sql
 select mol_from_smiles('OC1=CC=CC=C1') as phenol;
@@ -217,48 +252,45 @@ The RDKit cartridge reads the SMILES and writes it back in its own form:
 
 Type `\q` and press Enter to leave `psql`.
 
-## 5. Tell the lessons where the databases are
+## 6. The lessons find the databases by themselves
 
-Lessons read the databases' addresses from **environment variables**: named values the terminal
-passes to every program it starts. Setting them in the terminal you run the lessons from tells the
-lessons where to connect, and keeps addresses and passwords out of the code. They last until that
-terminal window is closed, so set them again in each new window:
+The lessons that use a database (Modules 4 and 5) read your `.env` file when their Setup block
+runs, with the small package python-dotenv, so there is nothing more to do. Their settings are
+**environment variables**: named values that programs read from their surroundings. A value that
+is already set in your terminal wins over the one in `.env`, which is how GitHub's automatic tests
+give the lessons their own passwords.
 
-| | macOS, Linux, WSL (bash, zsh) | Windows (PowerShell) |
-|---|---|---|
-| PostgreSQL | `export DATABASE_URL=postgresql://learn:learn@localhost:5432/chem` | `$env:DATABASE_URL="postgresql://learn:learn@localhost:5432/chem"` |
-| Neo4j | `export NEO4J_URI=bolt://localhost:7687 NEO4J_USER=neo4j NEO4J_PASSWORD=learn-neo4j` | `$env:NEO4J_URI="bolt://localhost:7687"; $env:NEO4J_USER="neo4j"; $env:NEO4J_PASSWORD="learn-neo4j"` |
-
-`DATABASE_URL` packs everything into one address: `postgresql://` (the kind of database), `learn:learn`
-(user name and password), `@localhost:5432` (where), `/chem` (which database). Check a variable is
-set with `echo $DATABASE_URL` (PowerShell: `echo $env:DATABASE_URL`): it prints the address.
-
-Then check that Python can reach both. Start Python in the series' environment (from
-`data-engineering/series-1`, type `uv run python`; the prompt becomes `>>>`), paste this, and press
-Enter twice:
+To check that Python can reach both databases, start Python in the series' environment (from
+`data-engineering/series-1`, type `uv run python`; the prompt becomes `>>>`), paste this, and
+press Enter twice:
 
 ```python
+import os
+
 import psycopg
+from dotenv import find_dotenv, load_dotenv
 from neo4j import GraphDatabase
 
-with psycopg.connect("postgresql://learn:learn@localhost:5432/chem") as db:
+load_dotenv(find_dotenv(usecwd=True))  # finds .env in this folder or the folders above
+with psycopg.connect(os.environ["DATABASE_URL"]) as db:
     print(db.execute("select mol_to_smiles(mol_from_smiles('OC1=CC=CC=C1'))").fetchone()[0])
-with GraphDatabase.driver("bolt://localhost:7687", auth=("neo4j", "learn-neo4j")) as driver:
+auth = (os.environ["NEO4J_USER"], os.environ["NEO4J_PASSWORD"])
+with GraphDatabase.driver(os.environ["NEO4J_URI"], auth=auth) as driver:
     driver.verify_connectivity()
     print("neo4j: ok")
 ```
 
 It prints `Oc1ccccc1` (phenol, written by the RDKit cartridge) and `neo4j: ok`. Type `exit()` to
-leave Python.
+leave Python. Notice that no password appears in the code: it is read from `.env`.
 
-## 6. Stop them
+## 7. Stop them
 
 From the repository's root:
 
 ```bash
-docker compose -f shared/docker/compose.yml stop      # stop; start again with "up -d"
-docker compose -f shared/docker/compose.yml down      # remove the containers; the data is kept
-docker compose -f shared/docker/compose.yml down -v   # remove the containers and delete the data
+docker compose --env-file .env -f shared/docker/compose.yml stop      # stop; start again with "up -d"
+docker compose --env-file .env -f shared/docker/compose.yml down      # remove the containers; the data is kept
+docker compose --env-file .env -f shared/docker/compose.yml down -v   # remove the containers and delete the data
 ```
 
 Until you stop them, the containers start again on their own whenever Docker starts, so the
@@ -274,8 +306,10 @@ so every learner gets the same database.
 | `permission denied ... docker.sock` | Your user is not in the `docker` group yet: run `sudo usermod -aG docker $USER`, then close the terminal and open it again. |
 | `no configuration file provided` or `open shared/docker/compose.yml: no such file` | The terminal is not at the repository's root. `cd` into the `monstrous-learn` folder and try again. |
 | `port is already allocated` or `address already in use` | Something else already uses the port, usually a PostgreSQL installed on the computer. Stop it, or in `compose.yml` change both lines ending `5432:5432` to end `5433:5432` (keep the address in front of them) and use port 5433 in `DATABASE_URL`. |
-| The Neo4j page says the connection or the password failed | Wait 30 seconds after starting (Neo4j starts slowly), check the password is `learn-neo4j`, and that the Connect URL ends in `localhost:7687`. |
-| `password authentication failed for user "learn"` | The password in `DATABASE_URL` does not match `compose.yml`. If you changed `compose.yml` after the first start, delete the data (`down -v`) and start again. |
+| The Neo4j page says the connection or the password failed | Wait 30 seconds after starting (Neo4j starts slowly), check you typed the `NEO4J_PASSWORD` from your `.env`, and that the Connect URL ends in `localhost:7687`. |
+| `password authentication failed for user "learn"` | The database was first started with a different password from the one now in `.env` (it keeps the first one). Delete the data (`down -v`) and start again, or put the first password back in `.env`. |
+| `required variable POSTGRES_PASSWORD is missing` | Docker did not find your `.env`. Check the file exists at the repository's root (`ls -a` lists it), that the command includes `--env-file .env`, and that you run it from the repository's root (section 2). |
+| A lesson skips its database blocks although the databases are running | The lesson did not find `.env`: run the lesson from inside the repository, so the file is in a folder above it. |
 | The containers stop a minute after you close the terminal (WSL) | WSL shuts Ubuntu down when nothing is using it. Keep an Ubuntu terminal open while you work; the containers start again with Ubuntu. |
 | Docker Desktop does not open, or closes at once | Often an update that did not finish. Reinstall it from docker.com, or use the WSL route above instead. Do not run Docker Desktop and Docker Engine in WSL at the same time: both want the same ports. |
 | Neo4j's log says `Changed password ... only take effect ... first time` | Normal on the first start. |

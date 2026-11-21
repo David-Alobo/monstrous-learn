@@ -11,3 +11,6 @@ data/*
 
 # data a lesson writes while it runs (never committed)
 data-engineering/*/*/work/
+
+# passwords and addresses: each person keeps their own .env (copied from .env.example)
+.env

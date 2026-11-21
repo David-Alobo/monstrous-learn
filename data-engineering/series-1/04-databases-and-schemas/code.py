@@ -25,6 +25,7 @@ import duckdb
 import numpy as np
 import pandas as pd
 import psycopg
+from dotenv import find_dotenv, load_dotenv
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
 from rdkit import Chem, RDLogger
@@ -52,11 +53,14 @@ SOURCE = "chemlib library, seed 4"  # where the rows came from, recorded with ev
 WORK = Path("work")
 DUCKDB_FILE = WORK / "chem.duckdb"
 
-# PostgreSQL (sections 7 and 8): the address comes from the environment, never from the code
+# passwords and addresses: from the environment, or from the course's .env file (copied from
+# .env.example at the repository's root); find_dotenv looks for it in this folder and the ones
+# above, and settings already in the environment are kept
+load_dotenv(find_dotenv(usecwd=True))
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 PG_SCHEMA = "module4"  # the lesson's own area inside the database, emptied at the start of section 7
 ANALYST = "analyst"  # the read-only colleague of section 8
-ANALYST_PASSWORD = os.environ.get("ANALYST_PASSWORD", "analyst-demo-only")
+ANALYST_PASSWORD = os.environ.get("ANALYST_PASSWORD", "")
 ACID_SMARTS = "[CX3](=O)[OX2H1]"  # a carboxylic acid: C=O and an O carrying one H (Module 2)
 
 RDLogger.DisableLog("rdApp.*")  # chemlib's molecules all parse; RDKit has nothing to tell us

@@ -21,6 +21,7 @@ PIP_NAME = {
     "yaml": "pyyaml",
     "sklearn": "scikit-learn",
     "psycopg": "psycopg[binary]",
+    "dotenv": "python-dotenv",
     "openbabel": "openbabel-wheel",
     "pydantic_settings": "pydantic-settings",
 }

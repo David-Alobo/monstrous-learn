@@ -1,7 +1,7 @@
 ---
 title: Databases, schemas and a chemical database
 summary: The kinds of database and what each is for, how to plan tables for chemical data before storing anything, how to describe them, and a chemical database in PostgreSQL with the RDKit cartridge, searched by substructure and similarity.
-requires: rdkit, pandas, numpy, duckdb, psycopg[binary]
+requires: rdkit, pandas, numpy, duckdb, psycopg[binary], python-dotenv
 services: postgres
 ---
 
@@ -58,9 +58,11 @@ database those blocks do nothing, and you can still read them and their outputs 
 
 Every lesson starts with this block. It loads the packages and sets the lesson's settings, written
 in CAPITALS, so they can be changed in one place. Run it first. Two settings come from
-**environment variables** (named values your terminal passes to programs, explained in the
-database guide) rather than from the code: where the PostgreSQL database is, and the password we
-give a colleague in section 8. Passwords never belong in code; section 8 explains why.
+**environment variables** (named values your terminal passes to programs) rather than from the
+code: where the PostgreSQL database is, and the password we give a colleague in section 8. On your
+own computer they are kept in a file called `.env` at the repository's root, which you make once by
+copying `.env.example` and choosing your own passwords (the database guide shows how);
+`load_dotenv` reads it. Passwords never belong in code; section 8 explains why.
 
 ```python
 import logging
@@ -71,6 +73,7 @@ import duckdb
 import numpy as np
 import pandas as pd
 import psycopg
+from dotenv import find_dotenv, load_dotenv
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
 from rdkit import Chem, RDLogger
@@ -98,11 +101,14 @@ SOURCE = "chemlib library, seed 4"  # where the rows came from, recorded with ev
 WORK = Path("work")
 DUCKDB_FILE = WORK / "chem.duckdb"
 
-# PostgreSQL (sections 7 and 8): the address comes from the environment, never from the code
+# passwords and addresses: from the environment, or from the course's .env file (copied from
+# .env.example at the repository's root); find_dotenv looks for it in this folder and the ones
+# above, and settings already in the environment are kept
+load_dotenv(find_dotenv(usecwd=True))
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 PG_SCHEMA = "module4"  # the lesson's own area inside the database, emptied at the start of section 7
 ANALYST = "analyst"  # the read-only colleague of section 8
-ANALYST_PASSWORD = os.environ.get("ANALYST_PASSWORD", "analyst-demo-only")
+ANALYST_PASSWORD = os.environ.get("ANALYST_PASSWORD", "")
 ACID_SMARTS = "[CX3](=O)[OX2H1]"  # a carboxylic acid: C=O and an O carrying one H (Module 2)
 
 RDLogger.DisableLog("rdApp.*")  # chemlib's molecules all parse; RDKit has nothing to tell us
@@ -804,17 +810,19 @@ is public. The habits that prevent this:
 
 - read passwords and addresses from **environment variables**, as this lesson does with
   `DATABASE_URL` and `ANALYST_PASSWORD`;
-- on your own computer, keep them in a file called `.env` (one `NAME=value` per line), loaded by a
-  small package such as python-dotenv, and list `.env` in the repository's `.gitignore` file so Git
-  never stores it;
+- on your own computer, keep them in a file called `.env` (one `NAME=value` per line), loaded with
+  the small package python-dotenv, and list `.env` in the repository's `.gitignore` file so Git
+  never stores it. This course does exactly that: the repository holds `.env.example`, with the
+  names and placeholder passwords, and each learner copies it to `.env` and chooses their own;
 - never print or log a connection string: [Module 14](../14-monitoring-pipelines/) removes
   passwords from logs automatically;
 - never open a database to the network: the course's `compose.yml` lets the databases be reached
   from your own computer only.
 
-The passwords in this course (`learn`, `analyst-demo-only`) are for databases on your own computer
-that nobody else can reach. A database on a server gets long random passwords, kept by whoever runs
-it, and changed if they ever leak.
+Even the passwords for these practice databases, which nobody else can reach, live in `.env` and
+not in the code: good habits are cheapest to learn on something that does not matter yet. A
+database on a server gets long random passwords, kept by whoever runs it, and changed if they ever
+leak.
 
 ## 9. Which database for which job
 

@@ -1,7 +1,7 @@
 ---
 title: Molecules as graphs, and graph databases
 summary: Work with molecules as graphs (rings, paths, substructure as graph matching, the largest shared substructure), then store chemistry that is all about links, synthesis routes and drug targets, in a Neo4j graph database and query it with Cypher.
-requires: rdkit, networkx, pandas, duckdb, neo4j
+requires: rdkit, networkx, pandas, duckdb, neo4j, python-dotenv
 services: neo4j
 ---
 
@@ -47,8 +47,8 @@ outputs here.
 
 Every lesson starts with this block. It loads the packages and sets the lesson's settings, written
 in CAPITALS, so they can be changed in one place. Run it first. Neo4j's address, user name and
-password come from **environment variables** (named values your terminal passes to programs,
-explained in the database guide), never from the code: [Module 4](../04-databases-and-schemas/#8-safe-access-accounts-rights-and-passwords)
+password come from **environment variables** (named values your terminal passes to programs), kept
+on your own computer in the course's `.env` file as Module 4 set it up, never in the code: [Module 4](../04-databases-and-schemas/#8-safe-access-accounts-rights-and-passwords)
 explains why.
 
 ```python
@@ -59,6 +59,7 @@ from pathlib import Path
 import duckdb
 import networkx as nx
 import pandas as pd
+from dotenv import find_dotenv, load_dotenv
 from networkx.algorithms import isomorphism
 from neo4j import GraphDatabase
 from neo4j.exceptions import ConstraintError
@@ -79,7 +80,11 @@ METHYL_SALICYLATE = "COC(=O)c1ccccc1O"
 SALICYLIC_ACID = "OC(=O)c1ccccc1O"
 MCS_TIMEOUT_S = 10  # give up the common-substructure search after this many seconds
 
-# Neo4j (sections 3 to 6): where it is and how to log in come from the environment
+# Neo4j (sections 3 to 6): where it is and how to log in
+# passwords and addresses: from the environment, or from the course's .env file (copied from
+# .env.example at the repository's root); find_dotenv looks for it in this folder and the ones
+# above, and settings already in the environment are kept
+load_dotenv(find_dotenv(usecwd=True))
 NEO4J_URI = os.environ.get("NEO4J_URI", "")
 NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "")
