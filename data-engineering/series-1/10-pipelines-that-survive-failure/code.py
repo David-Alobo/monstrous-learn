@@ -15,26 +15,58 @@ from pathlib import Path as _Path
 _HERE = _Path(__file__).resolve().parent
 _os.chdir(_HERE)
 _sys.path[:0] = [str(_HERE), str(_HERE.parent)]
+
+# ---- Setup ----
+import csv
+import logging
 import math
 import os
 import random
 import sqlite3
+import time
+from collections.abc import Callable
+from contextlib import closing
 from pathlib import Path
+from typing import Any, TextIO
 
 import pandas as pd
+from joblib import Memory
+from pydantic import Field, ValidationError, field_validator, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from rdkit import Chem, RDLogger
 from rdkit.Chem import Descriptors
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_random_exponential
 
 from chemlib import add_defects, library
 
-RDLogger.DisableLog("rdApp.*")  # bad molecules are reported in a table, not as log messages
-Path("work").mkdir(exist_ok=True)
+# log lines: level and message only, so the lesson's outputs are the same on every run
+# (a real job would add "%(asctime)s" to the format)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s", force=True)
+log = logging.getLogger(__name__)
+
+# defaults of the run settings (section 2); environment variables CHEMRUN_* override them
+WORK = Path("work")  # every file the lesson writes goes here
+N_MOLECULES = 12_000  # molecules drawn from chemlib
+BATCH_SIZE = 1_000  # records per batch: smaller batches lose less in a crash
+MAX_ATTEMPTS = 5  # calls in all before a transient failure is given up
+FIRST_DELAY_S = 0.5  # ceiling of the first retry wait, in seconds; it doubles after each failure
+MAX_DELAY_S = 30.0  # the largest retry ceiling, in seconds
+
+# the faulty library
+LIBRARY_SEED = 10  # chemlib's seed for the molecules
+DEFECT_RATE = 0.03  # fraction of records given a fault
+DEFECT_SEED = 11  # chemlib's seed for which records get which fault
+ALLOWED_ELEMENTS = {"C", "N", "O", "S", "F", "Cl", "Br"}  # anything else is quarantined
+
+# the lesson's demonstrations
+JITTER_SEED = 1  # seed for the random retry waits, so they are the same on every run
+CRASH_AT_BATCH = 7  # the batch at which the pipeline is made to crash
+CRASH_AFTER_ROWS = 4_000  # the row at which the CSV export is made to crash
+
+RDLogger.DisableLog("rdApp.*")  # bad molecules are reported in a table, not as RDKit messages
+WORK.mkdir(exist_ok=True)
 
 # ---- 2. Settings checked before a run starts ----
-from pydantic import Field, ValidationError, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
-
-
 class RunSettings(BaseSettings):
     """Everything a run needs to know, checked before it starts.
 
@@ -43,12 +75,12 @@ class RunSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="CHEMRUN_")
 
-    n_molecules: int = Field(12_000, gt=0)
-    batch_size: int = Field(1_000, gt=0)
-    work_dir: Path = Path("work")
-    max_attempts: int = Field(5, ge=1, le=10)
-    first_delay_s: float = Field(0.5, gt=0)
-    max_delay_s: float = Field(30.0, gt=0)
+    n_molecules: int = Field(N_MOLECULES, gt=0)
+    batch_size: int = Field(BATCH_SIZE, gt=0)
+    work_dir: Path = WORK
+    max_attempts: int = Field(MAX_ATTEMPTS, ge=1, le=10)
+    first_delay_s: float = Field(FIRST_DELAY_S, gt=0)
+    max_delay_s: float = Field(MAX_DELAY_S, gt=0)
 
     @field_validator("work_dir")
     @classmethod
@@ -74,16 +106,13 @@ os.environ["CHEMRUN_WORK_DIR"] = "wrok"
 try:
     RunSettings()
 except ValidationError as err:
-    print(f"refused to start: {err.error_count()} bad settings")
+    log.error("refused to start: %d bad settings", err.error_count())
     for problem in err.errors():
-        print(f"  {problem['loc'][0]}: {problem['msg']} (got {problem['input']!r})")
+        log.error("  %s: %s (got %r)", problem["loc"][0], problem["msg"], problem["input"])
 finally:
     del os.environ["CHEMRUN_BATCH_SIZE"], os.environ["CHEMRUN_WORK_DIR"]
 
 # ---- 3. One molecule at a time: quarantine, don't crash ----
-ALLOWED_ELEMENTS = {"C", "N", "O", "S", "F", "Cl", "Br"}
-
-
 class BadMolecule(Exception):
     """A permanent problem with a record: trying again will not fix it."""
 
@@ -138,13 +167,15 @@ def prepare_batch(batch: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     good_columns = ["id", "smiles", "canonical", "mol_wt", "logp", "tpsa"]
     return (pd.DataFrame(good, columns=good_columns),
             pd.DataFrame(bad, columns=["id", "smiles", "reason"]))
-source = add_defects(library(settings.n_molecules, seed=10), rate=0.03, seed=11)
+source = add_defects(library(settings.n_molecules, seed=LIBRARY_SEED), rate=DEFECT_RATE,
+                     seed=DEFECT_SEED)
 source = source.sort_values("id").reset_index(drop=True)
 n_batches = math.ceil(len(source) / settings.batch_size)
-print(f"{len(source):,} records in {n_batches} batches of up to {settings.batch_size:,}")
+log.info("%s records in %d batches of up to %s", f"{len(source):,}", n_batches,
+         f"{settings.batch_size:,}")
 print(source["defect"].replace("", "(none)").value_counts().to_string())
 good, bad = prepare_batch(source.iloc[: settings.batch_size])
-print(f"prepared {len(good)}, quarantined {len(bad)}")
+log.info("prepared %d, quarantined %d", len(good), len(bad))
 print(bad["reason"].value_counts().to_string())
 
 # ---- 4. Retries with back-off and jitter ----
@@ -155,7 +186,7 @@ class TransientError(Exception):
 class FlakyService:
     """A stand-in for a remote service that fails its first `failures` calls, then works."""
 
-    def __init__(self, failures: int):
+    def __init__(self, failures: int) -> None:
         self.failures = failures
         self.calls = 0
 
@@ -165,8 +196,10 @@ class FlakyService:
         if self.calls <= self.failures:
             raise TransientError(f"call {self.calls}: service busy")
         return prepare(smiles)
-def with_retries(func, *args, max_attempts=5, first_delay=0.5, max_delay=30.0,
-                 rng=random.Random(), sleep=None):
+def with_retries(func: Callable, *args, max_attempts: int = MAX_ATTEMPTS,
+                 first_delay: float = FIRST_DELAY_S, max_delay: float = MAX_DELAY_S,
+                 rng: random.Random | None = None,
+                 sleep: Callable[[float], None] = time.sleep) -> Any:
     """Call func(*args), retrying transient failures with exponential back-off and full jitter.
 
     Args:
@@ -175,8 +208,8 @@ def with_retries(func, *args, max_attempts=5, first_delay=0.5, max_delay=30.0,
         max_attempts: How many calls in all before giving up.
         first_delay: The ceiling of the first wait, in seconds; it doubles after each failure.
         max_delay: The largest ceiling, in seconds.
-        rng: The random number generator for the jitter.
-        sleep: How to wait (time.sleep in real use).
+        rng: The random number generator for the jitter (a fresh, unseeded one if not given).
+        sleep: How to wait (time.sleep unless told otherwise).
 
     Returns:
         What func returns.
@@ -184,6 +217,7 @@ def with_retries(func, *args, max_attempts=5, first_delay=0.5, max_delay=30.0,
     Raises:
         TransientError: If every attempt failed. Any other error is raised at once, unretried.
     """
+    rng = rng or random.Random()
     for attempt in range(1, max_attempts + 1):
         try:
             return func(*args)
@@ -192,29 +226,30 @@ def with_retries(func, *args, max_attempts=5, first_delay=0.5, max_delay=30.0,
                 raise
             ceiling = min(max_delay, first_delay * 2 ** (attempt - 1))
             delay = rng.uniform(0, ceiling)
-            print(f"  attempt {attempt} failed ({err}); waiting {delay:.2f} s of up to {ceiling} s")
+            log.warning("attempt %d failed (%s); waiting %.2f s of up to %s s",
+                        attempt, err, delay, ceiling)
             sleep(delay)
 
 
 waits = []
 service = FlakyService(failures=3)
-result = with_retries(service, "CC(=O)Oc1ccccc1C(=O)O", rng=random.Random(1), sleep=waits.append)
+result = with_retries(service, "CC(=O)Oc1ccccc1C(=O)O", rng=random.Random(JITTER_SEED),
+                      sleep=waits.append)
 print(f"succeeded on call {service.calls}: aspirin, MW {result['mol_wt']}")
 print(f"waited {sum(waits):.2f} s in all")
 try:
-    with_retries(FlakyService(failures=10), "CCO", rng=random.Random(1), sleep=waits.append)
+    with_retries(FlakyService(failures=10), "CCO", rng=random.Random(JITTER_SEED),
+                 sleep=waits.append)
 except TransientError as err:
-    print(f"gave up: {err}")
+    log.error("gave up: %s", err)
 
 broken = FlakyService(failures=0)
 try:
-    with_retries(broken, "C1CC", rng=random.Random(1), sleep=waits.append)
+    with_retries(broken, "C1CC", rng=random.Random(JITTER_SEED), sleep=waits.append)
 except BadMolecule as err:
-    print(f"not retried ({broken.calls} call): {err}")
+    log.warning("not retried (%d call), quarantined: %s", broken.calls, err)
 
 # ---- The same with tenacity ----
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_random_exponential
-
 service = FlakyService(failures=2)
 waits = []
 
@@ -231,18 +266,17 @@ def prepare_remotely(smiles: str) -> dict:
     return service(smiles)
 
 
-random.seed(1)  # tenacity draws its jitter from Python's random module
+random.seed(JITTER_SEED)  # tenacity draws its jitter from Python's random module
 print(prepare_remotely("CN1C=NC2=C1C(=O)N(C(=O)N2C)C"))
 print(f"{service.calls} calls; waits of {[round(w, 2) for w in waits]} s")
 
 # ---- 5. Idempotent batches ----
-naive = sqlite3.connect(Path("work") / "naive.sqlite")
-naive.execute("DROP TABLE IF EXISTS molecules")
-for attempt in (1, 2):
-    good.to_sql("molecules", naive, if_exists="append", index=False)
-    count = naive.execute("SELECT COUNT(*), COUNT(DISTINCT id) FROM molecules").fetchone()
-    print(f"after writing batch 0 {attempt}x: {count[0]} rows, {count[1]} different molecules")
-naive.close()
+with closing(sqlite3.connect(WORK / "naive.sqlite")) as naive:
+    naive.execute("DROP TABLE IF EXISTS molecules")
+    for attempt in (1, 2):
+        good.to_sql("molecules", naive, if_exists="append", index=False)
+        count = naive.execute("SELECT COUNT(*), COUNT(DISTINCT id) FROM molecules").fetchone()
+        print(f"after writing batch 0 {attempt}x: {count[0]} rows, {count[1]} different molecules")
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS molecules (
     id TEXT PRIMARY KEY, smiles TEXT, canonical TEXT, mol_wt REAL, logp REAL, tpsa REAL);
@@ -281,21 +315,24 @@ def count_rows(con: sqlite3.Connection) -> str:
     return ", ".join(f"{t} {n:,}" for t, n in zip(tables, counts, strict=True))
 
 
-demo_path = Path("work") / "demo.sqlite"
+demo_path = WORK / "demo.sqlite"
 demo_path.unlink(missing_ok=True)
-con = connect(demo_path)
-for attempt in (1, 2):
-    save_batch(con, good, bad)
-    print(f"after writing batch 0 {attempt}x: {count_rows(con)}")
-con.close()
+with closing(connect(demo_path)) as con:
+    for attempt in (1, 2):
+        save_batch(con, good, bad)
+        print(f"after writing batch 0 {attempt}x: {count_rows(con)}")
 
 # ---- 6. Checkpoints, crashes and resuming ----
 class SimulatedCrash(Exception):
     """Stands in for the process dying: power cut, out of memory, a server restart."""
 
 
+BatchPreparer = Callable[[pd.DataFrame], tuple[pd.DataFrame, pd.DataFrame]]
+
+
 def run_pipeline(source: pd.DataFrame, db_path: Path, batch_size: int,
-                 prepare_fn=prepare_batch, crash_at: int | None = None) -> list[int]:
+                 prepare_fn: BatchPreparer = prepare_batch,
+                 crash_at: int | None = None) -> list[int]:
     """Prepare every batch not yet checkpointed, saving each idempotently.
 
     Args:
@@ -308,10 +345,9 @@ def run_pipeline(source: pd.DataFrame, db_path: Path, batch_size: int,
     Returns:
         The batches this call ran.
     """
-    con = connect(db_path)
-    done = {row[0] for row in con.execute("SELECT batch FROM checkpoints")}
     ran = []
-    try:
+    with closing(connect(db_path)) as con:
+        done = {row[0] for row in con.execute("SELECT batch FROM checkpoints")}
         for k in range(math.ceil(len(source) / batch_size)):
             if k in done:
                 continue
@@ -323,33 +359,31 @@ def run_pipeline(source: pd.DataFrame, db_path: Path, batch_size: int,
                 con.execute("INSERT OR REPLACE INTO checkpoints VALUES (?, ?, ?)",
                             (k, len(good), len(bad)))
             ran.append(k)
-    finally:
-        con.close()
     return ran
 reference_path = settings.work_dir / "reference.sqlite"
 reference_path.unlink(missing_ok=True)
 ran = run_pipeline(source, reference_path, settings.batch_size)
-print(f"ran batches {ran[0]} to {ran[-1]}")
-with sqlite3.connect(reference_path) as con:
+log.info("ran batches %d to %d", ran[0], ran[-1])
+with closing(sqlite3.connect(reference_path)) as con:
     print(count_rows(con))
 run_path = settings.work_dir / "run.sqlite"
 run_path.unlink(missing_ok=True)
 try:
-    run_pipeline(source, run_path, settings.batch_size, crash_at=7)
+    run_pipeline(source, run_path, settings.batch_size, crash_at=CRASH_AT_BATCH)
 except SimulatedCrash as err:
-    print(f"crashed: {err}")
-with sqlite3.connect(run_path) as con:
+    log.error("crashed: %s", err)
+with closing(sqlite3.connect(run_path)) as con:
     print(count_rows(con))
     finished = [row[0] for row in con.execute("SELECT batch FROM checkpoints ORDER BY batch")]
 print(f"checkpointed batches: {finished}")
 ran = run_pipeline(source, run_path, settings.batch_size)
-print(f"resumed: skipped {len(finished)} finished batches, ran batches {ran}")
-with sqlite3.connect(run_path) as con:
+log.info("resumed: skipped %d finished batches, ran batches %s", len(finished), ran)
+with closing(sqlite3.connect(run_path)) as con:
     print(count_rows(con))
 def read_tables(db_path: Path) -> dict[str, pd.DataFrame]:
     """Every table of a run's database, sorted by its key, for comparison."""
     keys = {"molecules": "id", "quarantine": "id", "checkpoints": "batch"}
-    with sqlite3.connect(db_path) as con:
+    with closing(sqlite3.connect(db_path)) as con:
         return {t: pd.read_sql(f"SELECT * FROM {t} ORDER BY {k}", con) for t, k in keys.items()}
 
 
@@ -362,13 +396,11 @@ caught["reason"] = caught["reason"].fillna("(prepared)")
 print(pd.crosstab(caught["defect"].replace("", "(none)"), caught["reason"]).to_string())
 
 # ---- 7. Atomic writes ----
-import csv
-
 molecules = reference["molecules"]
 export_path = settings.work_dir / "molecules.csv"
 
 
-def write_rows(handle, table: pd.DataFrame, crash_after: int | None = None) -> None:
+def write_rows(handle: TextIO, table: pd.DataFrame, crash_after: int | None = None) -> None:
     """Write a table as CSV to an open file, one row at a time, optionally crashing partway."""
     writer = csv.writer(handle)
     writer.writerow(table.columns)
@@ -381,10 +413,11 @@ def write_rows(handle, table: pd.DataFrame, crash_after: int | None = None) -> N
 export_path.unlink(missing_ok=True)
 try:
     with open(export_path, "w", newline="", encoding="utf-8") as handle:
-        write_rows(handle, molecules, crash_after=4_000)
+        write_rows(handle, molecules, crash_after=CRASH_AFTER_ROWS)
 except SimulatedCrash as err:
-    print(f"crashed: {err}")
-print(f"the file exists: {export_path.exists()}, rows a reader sees: {len(pd.read_csv(export_path)):,}")
+    log.error("crashed: %s", err)
+rows_seen = len(pd.read_csv(export_path))
+print(f"the file exists: {export_path.exists()}, rows a reader sees: {rows_seen:,}")
 def write_csv_atomic(table: pd.DataFrame, path: Path, crash_after: int | None = None) -> None:
     """Write a table as CSV so that readers only ever see the old file or the complete new one.
 
@@ -407,15 +440,13 @@ def write_csv_atomic(table: pd.DataFrame, path: Path, crash_after: int | None = 
 write_csv_atomic(molecules, export_path)
 print(f"complete export: {len(pd.read_csv(export_path)):,} rows")
 try:
-    write_csv_atomic(molecules, export_path, crash_after=4_000)
+    write_csv_atomic(molecules, export_path, crash_after=CRASH_AFTER_ROWS)
 except SimulatedCrash as err:
-    print(f"crashed: {err}")
+    log.error("crashed: %s", err)
 print(f"after the crash: {len(pd.read_csv(export_path)):,} rows, "
       f"temporary file left behind: {export_path.with_name('molecules.csv.tmp').exists()}")
 
 # ---- 8. Cached results with joblib.Memory ----
-from joblib import Memory
-
 memory = Memory(settings.work_dir / "cache", verbose=0)
 memory.clear(warn=False)  # start the lesson with an empty cache
 computed = []

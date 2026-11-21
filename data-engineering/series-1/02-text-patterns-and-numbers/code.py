@@ -15,8 +15,25 @@ from pathlib import Path as _Path
 _HERE = _Path(__file__).resolve().parent
 _os.chdir(_HERE)
 _sys.path[:0] = [str(_HERE), str(_HERE.parent)]
-from rdkit import Chem
 
+# ---- Setup ----
+import logging
+
+import pandas as pd
+from rdkit import Chem, DataStructs
+from rdkit.Chem import AllChem, Descriptors, rdFingerprintGenerator
+
+# log lines: level and message only, so the lesson's outputs are the same on every run
+# (a real job would add "%(asctime)s" to the format)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s", force=True)
+log = logging.getLogger(__name__)
+
+# conformers (section 5): how many to generate, and the random seed that makes them repeatable
+N_CONFORMERS = 5
+CONFORMER_SEED = 42
+# Morgan fingerprints (section 7): radius 2 is ECFP4-like; 2048 bits is a common length
+MORGAN_RADIUS = 2
+MORGAN_BITS = 2048
 aspirin = Chem.MolFromSmiles("CC(=O)Oc1ccccc1C(=O)O")
 
 # ---- 1. SMILES: one molecule, many strings ----
@@ -33,7 +50,8 @@ s_ibuprofen = Chem.MolFromSmiles("CC(C)Cc1ccc(cc1)[C@H](C)C(=O)O")
 r_ibuprofen = Chem.MolFromSmiles("CC(C)Cc1ccc(cc1)[C@@H](C)C(=O)O")
 print("S:", Chem.FindMolChiralCenters(s_ibuprofen), Chem.MolToSmiles(s_ibuprofen))
 print("R:", Chem.FindMolChiralCenters(r_ibuprofen), Chem.MolToSmiles(r_ibuprofen))
-def flat(mol):
+def flat(mol: Chem.Mol) -> str:
+    """Canonical SMILES with the stereochemistry left out."""
     return Chem.MolToSmiles(mol, isomericSmiles=False)
 
 
@@ -57,10 +75,8 @@ ethanol = Chem.MolFromSmiles("CCO")
 print(Chem.MolToMolBlock(ethanol))
 
 # ---- 5. Three dimensions: conformers ----
-from rdkit.Chem import AllChem
-
 with_h = Chem.AddHs(aspirin)
-ids = AllChem.EmbedMultipleConfs(with_h, numConfs=5, randomSeed=42)
+ids = AllChem.EmbedMultipleConfs(with_h, numConfs=N_CONFORMERS, randomSeed=CONFORMER_SEED)
 print(len(ids), "conformers of", with_h.GetNumAtoms(), "atoms (hydrogens included)")
 print(
     "same atoms, different coordinates:",
@@ -83,19 +99,14 @@ for name, mol in library.items():
     )
 
 # ---- 7. Fingerprints: molecules as bits ----
-from rdkit import DataStructs
-from rdkit.Chem import rdFingerprintGenerator
-
-morgan = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
+morgan = rdFingerprintGenerator.GetMorganGenerator(radius=MORGAN_RADIUS, fpSize=MORGAN_BITS)
 fingerprints = {name: morgan.GetFingerprint(mol) for name, mol in library.items()}
-print("bits set in aspirin:", fingerprints["aspirin"].GetNumOnBits(), "of 2048")
+print("bits set in aspirin:", fingerprints["aspirin"].GetNumOnBits(), "of", MORGAN_BITS)
 for name in ["salicylic acid", "methyl salicylate", "ibuprofen"]:
     similarity = DataStructs.TanimotoSimilarity(fingerprints["aspirin"], fingerprints[name])
     print(f"Tanimoto similarity, aspirin and {name}: {similarity:.2f}")
 
 # ---- 8. Descriptors: molecules as numbers ----
-from rdkit.Chem import Descriptors
-
 print(f"{'molecule':18}{'MW':>8}{'logP':>7}{'TPSA':>7}{'HBD':>5}")
 for name, mol in library.items():
     print(
@@ -104,8 +115,6 @@ for name, mol in library.items():
     )
 
 # ---- 9. What to store, for which job ----
-import pandas as pd
-
 rows = []
 for name, mol in library.items():
     rows.append(

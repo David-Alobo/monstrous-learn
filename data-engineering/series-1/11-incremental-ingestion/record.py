@@ -19,12 +19,15 @@ from __future__ import annotations
 import datetime
 import hashlib
 import json
+import logging
 import time
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 import requests
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_random_exponential
+
+log = logging.getLogger(__name__)
 
 HERE = Path(__file__).parent
 RECORDED = HERE / "recorded"
@@ -34,7 +37,8 @@ PUBCHEM_PROPERTIES = (
     "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cids}/property/{props}/JSON"
 )
 
-# the same constants as the lesson
+# the same constants as the lesson (changing any of them changes the recorded URLs)
+PAGE_SIZE = 100
 QUERY = {
     "target_chembl_id": "CHEMBL3529",  # IKK-epsilon
     "standard_type": "IC50",
@@ -42,16 +46,21 @@ QUERY = {
     "order_by": "activity_id",
     "only": "activity_id,molecule_chembl_id,standard_type,standard_relation,standard_value,"
     "standard_units,pchembl_value,document_chembl_id",
-    "limit": "100",
+    "limit": str(PAGE_SIZE),
 }
 FIRST_RUN_CUTOFF = 18811464  # the first run sees only activities up to this id
 BACKFILL = (16279324, 16354699)  # the range the lesson backfills
 PROPERTIES = "Title,MolecularFormula,MolecularWeight,SMILES,InChIKey"
 CIDS_FIRST = [2244, 2519, 3672, 1983, 156391, 3033, 4091, 60823, 4594, 33613]
 CIDS_SECOND = [*CIDS_FIRST, 54678486, 5090, 2662, 999999999]
-CHUNK = 5
+CHUNK_SIZE = 5
 USER_AGENT = "monstrous-learn-course/1.0 (teaching example; record-and-replay recorder)"
 TRANSIENT = {429, 500, 502, 503, 504}
+# the recorder's own politeness: slower and more patient than the lesson, as it runs rarely
+MIN_INTERVAL_S = 0.5  # at most 2 requests per second
+TIMEOUT = (10, 120)  # seconds to connect, seconds to wait for the answer
+MAX_ATTEMPTS = 10  # requests in all before a transient failure is given up
+FIRST_WAIT_S, MAX_WAIT_S = 2, 120  # back-off: first ceiling and largest ceiling, in seconds
 
 
 class TransientHTTPError(Exception):
@@ -91,8 +100,8 @@ _last_request = [0.0]
 
 @retry(
     retry=retry_if_exception_type((TransientHTTPError, requests.ConnectionError, requests.Timeout)),
-    stop=stop_after_attempt(10),
-    wait=wait_random_exponential(multiplier=2, max=120),
+    stop=stop_after_attempt(MAX_ATTEMPTS),
+    wait=wait_random_exponential(multiplier=FIRST_WAIT_S, max=MAX_WAIT_S),
     reraise=True,
 )
 def get(url: str) -> tuple[int, dict]:
@@ -104,11 +113,11 @@ def get(url: str) -> tuple[int, dict]:
     Returns:
         The HTTP status and the JSON body.
     """
-    wait = 0.5 - (time.monotonic() - _last_request[0])  # at most 2 requests per second
+    wait = MIN_INTERVAL_S - (time.monotonic() - _last_request[0])
     if wait > 0:
         time.sleep(wait)
     _last_request[0] = time.monotonic()
-    response = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=(10, 120))
+    response = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT)
     if response.status_code in TRANSIENT:
         raise TransientHTTPError(f"HTTP {response.status_code} for {url}")
     return response.status_code, response.json()
@@ -130,7 +139,7 @@ def record(url: str, params: dict[str, str] | None = None) -> dict:
              "body": body}  # fmt: skip
     path = RECORDED / recording_name(url)
     path.write_text(json.dumps(entry, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
-    print(f"{path.name}  HTTP {status}  {url[:110]}")
+    log.info("%s  HTTP %d  %s", path.name, status, url[:110])
     return body
 
 
@@ -153,6 +162,7 @@ def walk(params: dict[str, str]) -> list[dict]:
 
 def main() -> None:
     """Record every response the lesson replays."""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     RECORDED.mkdir(exist_ok=True)
     for old in RECORDED.glob("*.json"):
         old.unlink()
@@ -165,12 +175,12 @@ def main() -> None:
     seen: set[int] = set()
     for cids in (CIDS_FIRST, CIDS_SECOND):
         new = [c for c in cids if c not in seen]
-        for i in range(0, len(new), CHUNK):
-            chunk = new[i : i + CHUNK]
+        for i in range(0, len(new), CHUNK_SIZE):
+            chunk = new[i : i + CHUNK_SIZE]
             record(PUBCHEM_PROPERTIES.format(cids=",".join(map(str, chunk)), props=PROPERTIES))
         seen.update(cids)
     total = sum(p.stat().st_size for p in RECORDED.glob("*.json"))
-    print(f"{len(list(RECORDED.glob('*.json')))} recordings, {total / 1024:.0f} KiB")
+    log.info("%d recordings, %.0f KiB", len(list(RECORDED.glob("*.json"))), total / 1024)
 
 
 if __name__ == "__main__":

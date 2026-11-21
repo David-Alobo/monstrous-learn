@@ -89,3 +89,40 @@ def test_lesson_pages_show_their_figures_and_further_reading(site):
         assert 'id="further-reading"' in html
         for src in re.findall(r'<img alt="[^"]*" src="(figures/[^"]+)"', html):
             assert (page.parent / src).exists(), (page, src)
+
+
+def test_big_picture_points_at_real_modules_and_steps():
+    for folder, data in build.journeys().items():
+        series = [s for _, s in SERIES if s["folder"] == folder]
+        assert series, f"journey.json names a course that is not in the catalogue: {folder}"
+        count = len(series[0]["modules"])
+        steps = data["stages"] + data["lanes"]
+        ids = [st["id"] for st in steps]
+        assert len(ids) == len(set(ids)), "every step needs its own id"
+        for key in ("title", "problem", "question", "intro"):
+            assert data[key].strip(), key
+        for st in steps:
+            for key in ("label", "asks", "answer", "why", "when"):
+                assert st[key].strip(), (st["id"], key)
+            assert st["how"] and st["modules"], st["id"]
+            assert all(1 <= n <= count for n in st["modules"]), (st["id"], st["modules"])
+        assert all(st.get("phase") for st in data["stages"]), "every main step has a phase"
+
+
+def test_every_written_module_appears_in_the_big_picture():
+    for folder, data in build.journeys().items():
+        series = next(s for _, s in SERIES if s["folder"] == folder)
+        covered = {n for st in data["stages"] + data["lanes"] for n in st["modules"]}
+        for m in series["modules"]:
+            assert m["number"] in covered, f"Module {m['number']} is in no step of the big picture"
+
+
+def test_big_picture_on_its_course_page_and_lesson_pages(site):
+    out, _ = site
+    for t, s in SERIES:
+        if s["folder"] not in build.journeys():
+            continue
+        page = (out / f"learn/{t['slug']}/{s['slug']}/index.html").read_text(encoding="utf-8")
+        assert 'id="big-picture"' in page and "assets/js/journey.js?v=" in page
+        for lesson in sorted((out / f"learn/{t['slug']}/{s['slug']}").glob("*/index.html")):
+            assert 'class="fits"' in lesson.read_text(encoding="utf-8"), lesson

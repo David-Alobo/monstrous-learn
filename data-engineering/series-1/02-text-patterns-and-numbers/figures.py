@@ -20,6 +20,9 @@ sys.path.insert(0, str(Path(__file__).parents[1]))  # the series folder, for fig
 from figurekit import ASPIRIN, CYAN, INK, MUTED, VIOLET, options  # noqa: E402
 
 OUT = Path(__file__).parent / "figures"
+# the Morgan fingerprint settings of the lesson's Setup block
+MORGAN_RADIUS = 2
+MORGAN_BITS = 2048
 
 
 def ibuprofen_enantiomers() -> str:
@@ -50,13 +53,13 @@ def smarts_acid() -> str:
 
 def fingerprint_bits() -> str:
     """The Morgan bits of aspirin and salicylic acid, with the bits they share marked."""
-    gen = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
+    gen = rdFingerprintGenerator.GetMorganGenerator(radius=MORGAN_RADIUS, fpSize=MORGAN_BITS)
     a = gen.GetFingerprint(Chem.MolFromSmiles(ASPIRIN))
     b = gen.GetFingerprint(Chem.MolFromSmiles("O=C(O)c1ccccc1O"))
     on_a, on_b = set(a.GetOnBits()), set(b.GetOnBits())
     shared = on_a & on_b
     w, h, left, top = 760, 230, 150, 36
-    bar = (w - left - 20) / 2048
+    bar = (w - left - 20) / MORGAN_BITS
 
     def row(y: float, on: set[int], label: str) -> str:
         cells = "".join(
@@ -73,7 +76,7 @@ def fingerprint_bits() -> str:
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}">'
         f'<rect width="{w}" height="{h}" fill="#ffffff"/>'
         f'<text x="{left}" y="22" font-family="sans-serif" font-size="13" fill="{MUTED}">'
-        f"2048 bits, bit 0 on the left; each coloured mark is a bit that is on</text>"
+        f"{MORGAN_BITS} bits, bit 0 on the left; each coloured mark is a bit that is on</text>"
         + row(top, on_a, f"aspirin ({len(on_a)})")
         + row(top + 60, on_b, f"salicylic acid ({len(on_b)})")
         + f'<rect x="{left}" y="{top + 128}" width="12" height="12" fill="{VIOLET}"/>'

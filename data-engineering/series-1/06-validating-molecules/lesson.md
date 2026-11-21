@@ -30,6 +30,52 @@ By the end of this module you will be able to:
 Everything here runs in a browser notebook or on any laptop: you need Python, RDKit, pandas and
 pyarrow.
 
+## Setup
+
+Everything this lesson needs is imported and set here, so the settings can be changed in one place.
+That includes the library's policy (the elements it allows, the salts and solvents it knows, its
+size limits), which section 3 explains check by check: a policy kept in one place can be read,
+reviewed and changed without hunting through the code. Pipeline steps report with `log`; `print`
+is kept for showing you results; Module 1 explains why.
+
+```python
+import logging
+import re
+from collections import Counter
+from collections.abc import Callable
+from pathlib import Path
+from typing import NamedTuple
+
+import pandas as pd
+from rdkit import Chem, RDLogger, rdBase
+from rdkit.Chem import Descriptors
+
+import chemlib
+
+# log lines: level and message only, so the lesson's outputs are the same on every run
+# (a real job would add "%(asctime)s" to the format)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s", force=True)
+log = logging.getLogger(__name__)
+
+# the teaching library and the damage done to it: change the size or seeds for another sample
+LIBRARY_SIZE = 10_000  # molecules made by chemlib
+LIBRARY_SEED = 6
+DEFECT_RATE = 0.05  # fraction of molecules given a fault by add_defects
+DEFECT_SEED = 7
+WORK = Path("work")  # where the accepted records and the quarantine are written
+
+# the library's policy (section 3): edit these lists and limits to suit another collection
+ALLOWED_ELEMENTS = {"H", "B", "C", "N", "O", "F", "P", "S", "Cl", "Br", "I"}
+SALTS = {"Cl": "hydrogen chloride", "[Cl-]": "chloride", "Br": "hydrogen bromide",
+         "[Na+]": "sodium", "[K+]": "potassium", "O=C(O)C(F)(F)F": "trifluoroacetic acid"}
+SOLVENTS = {"O": "water", "CCO": "ethanol", "CO": "methanol", "CS(C)=O": "DMSO",
+            "ClCCl": "dichloromethane"}  # fmt: skip
+HEAVY_ATOMS = (6, 50)  # smallest and largest number of heavy atoms in the largest piece
+MAX_WEIGHT = 700.0  # largest molecular weight of the largest piece, in g/mol
+
+WORK.mkdir(exist_ok=True)
+```
+
 ## 1. What goes wrong without a gate
 
 We start from a teaching library made by `chemlib` (the course's library generator, as in Module 2)
@@ -37,10 +83,8 @@ and damage it on purpose with `add_defects`. The damage is on record: the `defec
 which fault each row was given, so we can check our validator against the truth at the end.
 
 ```python
-import chemlib
-
-library = chemlib.library(10_000, seed=6)
-dirty = chemlib.add_defects(library, rate=0.05, seed=7)
+library = chemlib.library(LIBRARY_SIZE, seed=LIBRARY_SEED)
+dirty = chemlib.add_defects(library, rate=DEFECT_RATE, seed=DEFECT_SEED)
 print(len(dirty), "records")
 print(dirty["defect"].replace("", "(none)").value_counts().sort_index().to_string())
 ```
@@ -76,8 +120,6 @@ The usual first script reads every SMILES with RDKit, silences RDKit's warnings 
 the screen, and keeps what worked:
 
 ```python
-from rdkit import Chem, RDLogger
-
 RDLogger.DisableLog("rdApp.*")  # silence RDKit, as many scripts do
 mols = [Chem.MolFromSmiles(s) for s in dirty["smiles"]]
 RDLogger.EnableLog("rdApp.*")
@@ -110,9 +152,6 @@ instead: a short, stable **code** that programs can count and filter on, a **mes
 can read, and the **action** the gate should take.
 
 ```python
-from typing import NamedTuple
-
-
 class Issue(NamedTuple):
     """One problem found in a record: what it is, in words, and what to do about it."""
 
@@ -130,23 +169,27 @@ beside it.
 ### Capturing RDKit's messages
 
 When RDKit cannot read a SMILES it returns `None` and writes its reason to a log. We send that log
-to Python's `logging` module and collect the messages, so each record keeps its own:
+to Python's `logging` module, the same system our own `log` uses, and collect the messages, so each
+record keeps its own.
+
+This works because every logger can have its own **handlers**, which decide where its messages go.
+The Setup block gave the root logger one handler, which writes our pipeline's lines to the screen.
+RDKit's messages go to a logger named `"rdkit"`, and we give it a different handler: one that
+keeps each message in a list until the gate reads it. Setting `propagate = False` stops the same
+messages also reaching the root logger's screen handler, so a reason is recorded with its record
+instead of scrolling past:
 
 ```python
-import logging
-import re
-
-from rdkit import rdBase
-
-
 class Collector(logging.Handler):
     """Keeps RDKit's log messages, without their timestamps, until they are read."""
 
-    def __init__(self):
+    def __init__(self) -> None:
+        """Start with no messages."""
         super().__init__()
-        self.messages = []
+        self.messages: list[str] = []
 
-    def emit(self, record):
+    def emit(self, record: logging.LogRecord) -> None:
+        """Keep one message, with RDKit's "[hh:mm:ss] " prefix removed."""
         text = re.sub(r"^\[\d\d:\d\d:\d\d\] ", "", record.getMessage()).strip()
         self.messages.append(text)
 
@@ -155,7 +198,7 @@ rdBase.LogToPythonLogger()
 collector = Collector()
 rdkit_log = logging.getLogger("rdkit")
 rdkit_log.handlers = [collector]  # replace RDKit's own handler, which prints to the screen
-rdkit_log.propagate = False
+rdkit_log.propagate = False  # keep RDKit's messages away from our screen handler
 ```
 
 Reading happens in two steps. `Chem.MolFromSmiles(s, sanitize=False)` only checks the syntax: a
@@ -173,7 +216,7 @@ PROBLEM_CODES = {
 }
 
 
-def parse(smiles):
+def parse(smiles: str) -> tuple[Chem.Mol | None, list[Issue]]:
     """Read a SMILES and sanitise it, keeping RDKit's reasons when either step fails.
 
     Returns the sanitised molecule (or None) and a list of issues.
@@ -218,6 +261,93 @@ five-atom aromatic ring: not read
 
 Every failure now carries RDKit's own words, which point to the atom at fault.
 
+### Turning RDKit's messages down, or off
+
+Silencing RDKit was the first script's mistake, but some messages really are noise: a pipeline
+that has recorded a parse failure as an issue does not need it on the screen as well, and a
+standardiser can write several lines of chatter per molecule. RDKit gives you five controls, from
+the bluntest to the most precise. To see what each one lets through, `heard` runs some code and
+returns what reached our collector:
+
+```python
+def heard(action: Callable[[], object]) -> list[str]:
+    """Run some RDKit code and return the messages that reached the collector."""
+    collector.messages.clear()
+    action()
+    return collector.messages.copy()
+
+
+def two_problems() -> None:
+    """Read one SMILES that fails (an error) and one with a lone hydrogen (a warning)."""
+    Chem.MolFromSmiles("c1ccccc")
+    Chem.MolFromSmiles("C.[H]")
+
+
+print("everything on:", *heard(two_problems), sep="\n    ")
+```
+```output
+everything on:
+    SMILES Parse Error: unclosed ring for input: 'c1ccccc'
+    WARNING: not removing hydrogen atom without neighbors
+```
+
+RDKit sorts its messages into four channels, `rdApp.debug`, `rdApp.info`, `rdApp.warning` and
+`rdApp.error`, and `LogToPythonLogger` delivers them to the `"rdkit"` logger at the matching
+`logging` level. The first two controls work in RDKit itself, before a message is made, so they
+apply to every handler at once:
+
+```python
+# 1. one channel off, here the warnings, then on again
+RDLogger.DisableLog("rdApp.warning")
+print("warnings off:", *heard(two_problems), sep="\n    ")
+RDLogger.EnableLog("rdApp.warning")
+
+# 2. everything off, but only inside the with block: the rest of the program is untouched
+with rdBase.BlockLogs():
+    print("inside BlockLogs:", heard(two_problems))
+print("after BlockLogs:", len(heard(two_problems)), "messages")
+```
+```output
+warnings off:
+    SMILES Parse Error: unclosed ring for input: 'c1ccccc'
+inside BlockLogs: []
+after BlockLogs: 2 messages
+```
+
+The next two work in Python's `logging`, after the message is made, so different destinations can
+get different amounts: here the collector keeps every message and a file only the errors.
+
+```python
+# 3. a level on RDKit's logger: here only errors and worse pass
+rdkit_log.setLevel(logging.ERROR)
+print("logger at ERROR:", *heard(two_problems), sep="\n    ")
+rdkit_log.setLevel(logging.WARNING)  # back to RDKit's default: warnings and errors
+
+# 4. a level on one handler: the collector keeps everything, a file handler only errors
+to_file = logging.FileHandler(WORK / "rdkit.log", mode="w", encoding="utf-8")
+to_file.setLevel(logging.ERROR)
+rdkit_log.addHandler(to_file)
+print("collector:", len(heard(two_problems)), "messages")
+rdkit_log.removeHandler(to_file)
+to_file.close()
+logged = (WORK / "rdkit.log").read_text(encoding="utf-8").strip()
+print("rdkit.log:", re.sub(r"^\[\d\d:\d\d:\d\d\] ", "", logged))  # without the time
+```
+```output
+logger at ERROR:
+    SMILES Parse Error: unclosed ring for input: 'c1ccccc'
+collector: 2 messages
+rdkit.log: SMILES Parse Error: unclosed ring for input: 'c1ccccc'
+```
+
+The fifth is the one most scripts use, and the one section 1 showed going wrong:
+`RDLogger.DisableLog("rdApp.*")` switches every channel off for the whole program, until something
+switches them on again. Use it only where the reason for every failure is recorded some other way,
+as the later modules of this course do once they keep issues like ours. Two more things to know:
+the settings belong to one process, so worker processes (Module 9) need them set in each worker;
+and RDKit's logger starts at `WARNING`, which is why the info channel's chatter (a standardiser
+reporting each step) is not seen until you lower the level to `INFO`.
+
 ## 3. Checks on a molecule that can be read
 
 A molecule that RDKit reads may still be wrong for the library. Each check below looks at one
@@ -225,15 +355,13 @@ property, returns a list of issues (empty when all is well), and is short enough
 
 ### Elements
 
-A drug-like screening library contains a handful of elements. An **allow-list** names them; anything
-else is either a mistake or a compound the library should not hold. An allow-list is safer than a
-list of forbidden elements, because it rejects what nobody thought of:
+A drug-like screening library contains a handful of elements. An **allow-list** names them
+(`ALLOWED_ELEMENTS`, set in the Setup block); anything else is either a mistake or a compound the
+library should not hold. An allow-list is safer than a list of forbidden elements, because it
+rejects what nobody thought of:
 
 ```python
-ALLOWED_ELEMENTS = {"H", "B", "C", "N", "O", "F", "P", "S", "Cl", "Br", "I"}
-
-
-def check_elements(mol):
+def check_elements(mol: Chem.Mol) -> list[Issue]:
     """Elements outside the allow-list."""
     found = sorted({atom.GetSymbol() for atom in mol.GetAtoms()} - ALLOWED_ELEMENTS)
     if not found:
@@ -256,16 +384,11 @@ acetate from the graph Laplacian; RDKit's `GetMolFrags` gives the same answer di
 depends on what the extra pieces are. A counter-ion or a solvent can be stripped to leave one
 parent compound (Module 7 does it), so those are fixable. Two drug-sized pieces are a **mixture**:
 no rule can say which one was tested, so the record is rejected. Real pipelines keep lists of
-known salts and solvents for this; ours is short:
+known salts and solvents for this; ours, `SALTS` and `SOLVENTS` in the Setup block, are short
+(six counter-ions and five solvents, each with its name):
 
 ```python
-SALTS = {"Cl": "hydrogen chloride", "[Cl-]": "chloride", "Br": "hydrogen bromide",
-         "[Na+]": "sodium", "[K+]": "potassium", "O=C(O)C(F)(F)F": "trifluoroacetic acid"}
-SOLVENTS = {"O": "water", "CCO": "ethanol", "CO": "methanol", "CS(C)=O": "DMSO",
-            "ClCCl": "dichloromethane"}  # fmt: skip
-
-
-def check_fragments(mol):
+def check_fragments(mol: Chem.Mol) -> list[Issue]:
     """More than one molecule in the record: salts and solvents (fixable) or a mixture."""
     pieces = sorted(Chem.MolToSmiles(f) for f in Chem.GetMolFrags(mol, asMols=True))
     if len(pieces) == 1:
@@ -316,7 +439,7 @@ Charges that cancel inside the molecule are different: a nitro group is written 
 `-` in RDKit, and a zwitterionic amino acid has both. We flag only a net charge:
 
 ```python
-def check_charge(mol):
+def check_charge(mol: Chem.Mol) -> list[Issue]:
     """A net formal charge on the record (charges that cancel, as in nitro groups, are fine)."""
     net = Chem.GetFormalCharge(mol)
     if net == 0:
@@ -342,7 +465,7 @@ cannot be told apart from either enantiomer. `Chem.FindPotentialStereo` lists ev
 bond that could carry stereochemistry and whether the record specifies it:
 
 ```python
-def check_stereo(mol):
+def check_stereo(mol: Chem.Mol) -> list[Issue]:
     """Stereocentres and double bonds whose configuration the record does not give."""
     missing = [
         info
@@ -375,16 +498,11 @@ Here we warn, and the warning is stored with the record.
 
 Size limits catch records that cannot be what the library holds: a lone solvent molecule that lost
 its compound, a fragment cut off by a broken export, a polymer or peptide in a small-molecule
-collection. We measure the largest piece, because a counter-ion says nothing about the compound:
+collection. We measure the largest piece, because a counter-ion says nothing about the compound,
+against the limits `HEAVY_ATOMS` and `MAX_WEIGHT` set in the Setup block:
 
 ```python
-from rdkit.Chem import Descriptors
-
-HEAVY_ATOMS = (6, 50)
-MAX_WEIGHT = 700.0
-
-
-def check_size(mol):
+def check_size(mol: Chem.Mol) -> list[Issue]:
     """The largest piece must be between the heavy-atom limits and below the weight limit."""
     piece = max(Chem.GetMolFrags(mol, asMols=True), key=lambda f: f.GetNumHeavyAtoms())
     heavy = piece.GetNumHeavyAtoms()
@@ -422,7 +540,7 @@ when it has no issues or only warnings, and quarantined otherwise. The rule fits
 CHECKS = [check_elements, check_fragments, check_charge, check_stereo, check_size]
 
 
-def validate(smiles):
+def validate(smiles: str) -> list[Issue]:
     """Every issue found in one record: from parsing, or from every check if it can be read."""
     mol, issues = parse(smiles)
     if mol is None:
@@ -432,7 +550,7 @@ def validate(smiles):
     return issues
 
 
-def verdict(issues):
+def verdict(issues: list[Issue]) -> str:
     """Accept a record with no issues or only warnings; quarantine everything else."""
     blocking = [i for i in issues if i.action != "warn"]
     return "quarantine" if blocking else "accept"
@@ -454,22 +572,23 @@ salt, and also too small for this library. A chemist fixing the record at its so
 ![The validation gate. Every record is read and sanitised; records that cannot be read are quarantined with RDKit's reason. Readable records go through five checks, each adding issues with a code, a message and an action. Records with no issues, or only warnings, are accepted; the rest are quarantined, and those whose issues are all fixable go on to standardisation in Module 7](figures/validation-gate.svg)
 
 Now the whole library. Each record gets its issues, its codes and its verdict, in new columns
-beside the original data, so nothing about the record is lost:
+beside the original data, so nothing about the record is lost. This is the step a nightly job
+would run unattended, so it reports with `log`, and the quarantine count is a warning: it is the
+number someone should look at in the morning.
 
 ```python
-import pandas as pd
-
 results = dirty.copy()
 results["issues"] = [validate(s) for s in results["smiles"]]
 results["codes"] = [";".join(i.code for i in issues) for issues in results["issues"]]
 results["verdict"] = [verdict(issues) for issues in results["issues"]]
-print(results["verdict"].value_counts().to_string())
 assert len(results) == len(dirty), "every record leaves the gate"
+n_quarantined = int((results["verdict"] == "quarantine").sum())
+log.info("validated %d records: %d accepted", len(results), len(results) - n_quarantined)
+log.warning("quarantined %d records", n_quarantined)
 ```
 ```output
-verdict
-accept        9666
-quarantine     417
+INFO validated 10083 records: 9666 accepted
+WARNING quarantined 417 records
 ```
 
 The assertion is the point of the whole module: every one of the 10,083 records came out, either
@@ -504,24 +623,19 @@ ML-00027465    SALT                           counter-ion Cl (hydrogen chloride)
 
 The **summary by reason** is what a team reviews each day: which faults arrive, how often, and
 which can be repaired. It counts records, not issues, over the whole library, so warnings on
-accepted records appear too:
+accepted records appear too. A `Counter` (from the standard library's `collections`, imported in
+the Setup block) is made for this: it is a dictionary that starts every count at zero, so each
+record simply adds one to each of its reasons. Taking the reasons of a record as a set first means
+a record with two issues of one kind is counted once:
 
 ```python
-every_issue = results.explode("issues").dropna(subset=["issues"])
-summary = (
-    pd.DataFrame(
-        {
-            "id": every_issue["id"],
-            "code": [i.code for i in every_issue["issues"]],
-            "action": [i.action for i in every_issue["issues"]],
-        }
-    )
-    .groupby(["code", "action"])["id"]
-    .nunique()
-    .rename("records")
-    .reset_index()
-    .sort_values(["records", "code"], ascending=[False, True])
-)
+records_per_reason = Counter()
+for issues in results["issues"]:
+    records_per_reason.update({(i.code, i.action) for i in issues})
+summary = pd.DataFrame(
+    [(code, action, n) for (code, action), n in records_per_reason.items()],
+    columns=["code", "action", "records"],
+).sort_values(["records", "code"], ascending=[False, True])
 print(summary.to_string(index=False))
 ```
 ```output
@@ -548,16 +662,20 @@ Accepted records and the quarantine are written out side by side. The issues are
 codes and messages, plain text that any tool can read:
 
 ```python
-from pathlib import Path
-
-Path("work").mkdir(exist_ok=True)
 accepted = results[results["verdict"] == "accept"].drop(columns=["issues"])
-accepted.to_parquet("work/accepted.parquet", index=False)
-quarantine.to_parquet("work/quarantine.parquet", index=False)
-print(len(accepted), "accepted +", quarantine["id"].nunique(), "quarantined =", len(dirty))
+accepted_path = WORK / "accepted.parquet"
+quarantine_path = WORK / "quarantine.parquet"
+accepted.to_parquet(accepted_path, index=False)
+quarantine.to_parquet(quarantine_path, index=False)
+n_quarantined = quarantine["id"].nunique()
+assert len(accepted) + n_quarantined == len(dirty), "every record is in one file or the other"
+log.info("wrote %d accepted records to %s", len(accepted), accepted_path.as_posix())
+log.info("wrote %d issues on %d quarantined records to %s", len(quarantine), n_quarantined,
+         quarantine_path.as_posix())  # fmt: skip
 ```
 ```output
-9666 accepted + 417 quarantined = 10083
+INFO wrote 9666 accepted records to work/accepted.parquet
+INFO wrote 541 issues on 417 quarantined records to work/quarantine.parquet
 ```
 
 ## 5. Checks across records: duplicates

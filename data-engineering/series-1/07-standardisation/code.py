@@ -16,9 +16,51 @@ _HERE = _Path(__file__).resolve().parent
 _os.chdir(_HERE)
 _sys.path[:0] = [str(_HERE), str(_HERE.parent)]
 
-# ---- 1. One compound, many records ----
-from rdkit import Chem
+# ---- Setup ----
+import hashlib
+import json
+import logging
+import time
+from collections.abc import Callable
+from pathlib import Path
+from typing import NamedTuple
 
+import pandas as pd
+import rdkit
+from rdkit import Chem, RDLogger
+from rdkit.Chem.MolStandardize import rdMolStandardize
+
+import chemlib
+
+# log lines: level and message only, so the lesson's outputs are the same on every run
+# (a real job would add "%(asctime)s" to the format)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s", force=True)
+log = logging.getLogger(__name__)
+
+# tests of the standardiser (section 4): a sample of the library, and random SMILES of each
+TEST_SAMPLE_SIZE = 500  # molecules checked for idempotency and invariance
+TEST_SAMPLE_SEED = 31
+RANDOM_SMILES = 3  # randomly written SMILES per molecule in the invariance test
+RANDOM_SMILES_SEED = 7
+
+# the dirty library of section 5: change the size or seeds for another sample
+LIBRARY_SIZE = 4_000  # molecules made by chemlib for vendor A
+LIBRARY_SEED = 21
+DEFECT_RATE = 0.05  # fraction of molecules given a fault by add_defects
+DEFECT_SEED = 22
+VENDOR_B_SIZE = 200  # vendor A compounds that vendor B also sells, as salts
+VENDOR_B_SEED = 5
+
+# the short validation gate of section 5 (Module 6 has the full one)
+ALLOWED_ELEMENTS = {"H", "B", "C", "N", "O", "F", "P", "S", "Cl", "Br", "I"}
+SALTS_AND_SOLVENTS = {"Cl", "[Cl-]", "Br", "[Na+]", "[K+]", "O=C(O)C(F)(F)F", "O", "CCO", "CO"}
+
+TAUTOMER_SAMPLE_SIZE = 200  # molecules timed with and without the tautomer step (section 6)
+WORK = Path("work")  # where the standardised table is written
+
+WORK.mkdir(exist_ok=True)
+
+# ---- 1. One compound, many records ----
 records = {
     "free base": "O=C(NCc1ccc(F)cc1)c1ccc(C2CCNCC2)cc1",
     "hydrochloride, as HCl": "O=C(NCc1ccc(F)cc1)c1ccc(C2CCNCC2)cc1.Cl",
@@ -29,8 +71,6 @@ for name, smiles in records.items():
     print(f"{name:22} {Chem.MolToInchiKey(Chem.MolFromSmiles(smiles))}")
 
 # ---- Clean-up: one way to draw each group ----
-from rdkit.Chem.MolStandardize import rdMolStandardize
-
 for smiles in ["CN(=O)=O", "CS(C)=O", "C[S+](C)[O-]"]:
     mol = Chem.MolFromSmiles(smiles)
     cleaned = rdMolStandardize.Cleanup(mol)
@@ -55,12 +95,6 @@ for smiles in ["Oc1ccccn1", "O=c1cccc[nH]1", "O=C1C=CCC=C1"]:
     print(f"{smiles:14} -> {Chem.MolToSmiles(canonical)}")
 
 # ---- 3. One pure function, with versioned rules ----
-import hashlib
-import json
-from typing import NamedTuple
-
-import rdkit
-
 RULES_VERSION = "1.0.0"  # change it whenever a step or a default changes
 
 
@@ -74,11 +108,11 @@ class Options(NamedTuple):
     max_tautomers: int = 1000
 
 
-def config_hash(options):
+def config_hash(options: Options) -> str:
     """A short fingerprint of everything that decides the output: the rules, options and RDKit."""
     config = {"rules": RULES_VERSION, "rdkit": rdkit.__version__, **options._asdict()}
     text = json.dumps(config, sort_keys=True)
-    return hashlib.sha256(text.encode()).hexdigest()[:12]
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
 
 
 DEFAULT = Options()
@@ -89,10 +123,10 @@ class Standardised(NamedTuple):
     """The canonical SMILES of a record and the steps that changed it."""
 
     smiles: str
-    changed_by: tuple
+    changed_by: tuple[str, ...]
 
 
-def steps_for(options):
+def steps_for(options: Options) -> list[tuple[str, Callable[[Chem.Mol], Chem.Mol]]]:
     """The standardisation steps switched on in `options`, in the order they run."""
     steps = []
     if options.cleanup:
@@ -110,7 +144,7 @@ def steps_for(options):
     return steps
 
 
-def standardise(smiles, options=DEFAULT):
+def standardise(smiles: str, options: Options = DEFAULT) -> Standardised:
     """The canonical form of one record under `options`. Pure: nothing else is read or changed.
 
     Raises ValueError for SMILES that cannot be read: validate first (Module 6).
@@ -132,7 +166,7 @@ for name, smiles in records.items():
     print(f"{name:22} {result.smiles}  changed by: {', '.join(result.changed_by) or '-'}")
 
 # ---- 4. Testing it like software ----
-def test_known_cases():
+def test_known_cases() -> None:
     """Records whose standard form is agreed in advance."""
     assert standardise("CC(=O)[O-].[Na+]").smiles == "CC(=O)O"  # sodium acetate -> acetic acid
     assert standardise("[NH3+]CC(=O)[O-]").smiles == "NCC(=O)O"  # zwitterion -> neutral glycine
@@ -143,37 +177,29 @@ def test_known_cases():
 
 
 test_known_cases()
-print("known cases pass")
-import chemlib
-
-
-def is_idempotent(smiles, options=DEFAULT):
+log.info("known cases pass")
+def is_idempotent(smiles: str, options: Options = DEFAULT) -> bool:
     """Standardising the output again gives the output."""
     once = standardise(smiles, options).smiles
     return standardise(once, options).smiles == once
 
 
-def is_invariant(smiles, options=DEFAULT, n=3):
+def is_invariant(smiles: str, options: Options = DEFAULT, n: int = RANDOM_SMILES) -> bool:
     """n randomly written SMILES of the same molecule all give one output."""
     mol = Chem.MolFromSmiles(smiles)
-    variants = Chem.MolToRandomSmilesVect(mol, n, randomSeed=7)
+    variants = Chem.MolToRandomSmilesVect(mol, n, randomSeed=RANDOM_SMILES_SEED)
     return len({standardise(s, options).smiles for s in [smiles, *variants]}) == 1
 
 
-sample = chemlib.library(500, seed=31)["smiles"]
-print("idempotent:", sum(is_idempotent(s) for s in sample), "of", len(sample))
-print("invariant: ", sum(is_invariant(s) for s in sample), "of", len(sample))
+sample = chemlib.library(TEST_SAMPLE_SIZE, seed=TEST_SAMPLE_SEED)["smiles"]
+log.info("idempotent: %d of %d", sum(is_idempotent(s) for s in sample), len(sample))
+log.info("invariant: %d of %d", sum(is_invariant(s) for s in sample), len(sample))
 
 # ---- Validate first ----
-import pandas as pd
-from rdkit import RDLogger
-
 RDLogger.DisableLog("rdApp.*")  # the reasons are Module 6's subject; here we only need verdicts
-ALLOWED_ELEMENTS = {"H", "B", "C", "N", "O", "F", "P", "S", "Cl", "Br", "I"}
-SALTS_AND_SOLVENTS = {"Cl", "[Cl-]", "Br", "[Na+]", "[K+]", "O=C(O)C(F)(F)F", "O", "CCO", "CO"}
 
 
-def gate(smiles):
+def gate(smiles: str) -> str:
     """'reject' for unreadable records, foreign elements or unknown fragments; else 'pass'."""
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
@@ -187,8 +213,8 @@ def gate(smiles):
     return "pass"
 
 
-library = chemlib.library(4_000, seed=21)
-vendor_a = chemlib.add_defects(library, rate=0.05, seed=22)
+library = chemlib.library(LIBRARY_SIZE, seed=LIBRARY_SEED)
+vendor_a = chemlib.add_defects(library, rate=DEFECT_RATE, seed=DEFECT_SEED)
 vendor_a["verdict"] = [gate(s) for s in vendor_a["smiles"]]
 print(pd.crosstab(vendor_a["defect"].replace("", "(none)"), vendor_a["verdict"]).to_string())
 
@@ -196,7 +222,7 @@ print(pd.crosstab(vendor_a["defect"].replace("", "(none)"), vendor_a["verdict"])
 BASIC_AMINE = Chem.MolFromSmarts("[NX3;H2,H1;!$(N-C=[O,N,S]);!$(N-a);!$(N-[S,N,O])]")
 
 
-def as_hydrochloride(smiles):
+def as_hydrochloride(smiles: str) -> str:
     """The compound with its first basic amine protonated, and a chloride ion beside it."""
     mol = Chem.RWMol(Chem.MolFromSmiles(smiles))
     atom = mol.GetAtomWithIdx(mol.GetSubstructMatch(BASIC_AMINE)[0])
@@ -208,7 +234,7 @@ def as_hydrochloride(smiles):
 
 passed = vendor_a[(vendor_a["verdict"] == "pass") & (vendor_a["defect"] == "")]
 basic = passed[[Chem.MolFromSmiles(s).HasSubstructMatch(BASIC_AMINE) for s in passed["smiles"]]]
-picked = basic.sample(200, random_state=5).sort_values("id")
+picked = basic.sample(VENDOR_B_SIZE, random_state=VENDOR_B_SEED).sort_values("id")
 vendor_b = pd.DataFrame(
     {
         "id": [f"VB-{k:05d}" for k in range(len(picked))],
@@ -238,13 +264,13 @@ standard = pd.DataFrame(
     }
 )
 changed = standard[standard["changed_by"] != ""]
-print(len(standard), "records standardised;", len(changed), "changed")
+log.info("standardised %d records; %d changed", len(standard), len(changed))
 print(changed["changed_by"].value_counts().sort_index().to_string())
 examples = changed.groupby("changed_by").head(1)
 print(examples[["id", "input_smiles", "smiles"]].to_string(index=False, max_colwidth=58))
 
 # ---- Duplicates that only standardisation reveals ----
-def inchikey(smiles):
+def inchikey(smiles: str) -> str:
     """The InChIKey of a SMILES."""
     return Chem.MolToInchiKey(Chem.MolFromSmiles(smiles))
 
@@ -253,7 +279,7 @@ standard["inchikey_in"] = [inchikey(s) for s in standard["input_smiles"]]
 standard["inchikey"] = [inchikey(s) for s in standard["smiles"]]
 
 
-def duplicate_groups(keys):
+def duplicate_groups(keys: pd.Series) -> int:
     """How many identities are held by more than one record."""
     sizes = keys.value_counts()
     return int((sizes > 1).sum())
@@ -274,23 +300,22 @@ with_vendor_b = sum(any(i.startswith("VB-") for i in ids) for ids in joined)
 grown = sum(standard.loc[standard["inchikey"] == key, "inchikey_in"].duplicated().any()
             for key in joined.index)  # fmt: skip
 print(with_vendor_b, "of them include a vendor B record;", grown, "already held a duplicate before")
-from pathlib import Path
-
-Path("work").mkdir(exist_ok=True)
-standard.to_parquet("work/standardised.parquet", index=False)
+standard_path = WORK / "standardised.parquet"
+standard.to_parquet(standard_path, index=False)
+log.info("wrote %d records to %s", len(standard), standard_path.as_posix())
 print(standard.columns.tolist())
 
 # ---- 6. Tautomers: what they cost and when to skip them ----
-import time
-
-tautomer_sample = library["smiles"].head(200).tolist()
+tautomer_sample = library["smiles"].head(TAUTOMER_SAMPLE_SIZE).tolist()
 start = time.perf_counter()
 plain = [standardise(s) for s in tautomer_sample]
 middle = time.perf_counter()
 with_tautomers = [standardise(s, WITH_TAUTOMERS) for s in tautomer_sample]
 end = time.perf_counter()
-print(f"without tautomers: {1000 * (middle - start) / len(tautomer_sample):.1f} ms per molecule")
-print(f"with tautomers:    {1000 * (end - middle) / len(tautomer_sample):.1f} ms per molecule")
+log.info("without tautomers: %.1f ms per molecule",
+         1000 * (middle - start) / len(tautomer_sample))  # fmt: skip
+log.info("with tautomers:    %.1f ms per molecule",
+         1000 * (end - middle) / len(tautomer_sample))  # fmt: skip
 moved = [(p.smiles, t.smiles) for p, t in zip(plain, with_tautomers) if p.smiles != t.smiles]
 same_key = sum(
     Chem.MolToInchiKey(Chem.MolFromSmiles(a)) == Chem.MolToInchiKey(Chem.MolFromSmiles(b))

@@ -16,18 +16,41 @@ _HERE = _Path(__file__).resolve().parent
 _os.chdir(_HERE)
 _sys.path[:0] = [str(_HERE), str(_HERE.parent)]
 
-# ---- 1. A molecule is a graph ----
+# ---- Setup ----
+import logging
+
+import networkx as nx
+import numpy as np
+import pandas as pd
 from rdkit import Chem
 
+# log lines: level and message only, so the lesson's outputs are the same on every run
+# (a real job would add "%(asctime)s" to the format)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s", force=True)
+log = logging.getLogger(__name__)
+
+# elements that get their own one-hot column (section 2); every other element shares "other".
+# Add "S", "F", "Cl" and so on for a drug-like library.
+ELEMENTS = ["C", "N", "O"]
+# RDKit's bond types, one layer of the bond tensor and one edge feature each (section 2)
+BOND_TYPES = ["SINGLE", "DOUBLE", "TRIPLE", "AROMATIC"]
+
+# ---- Why log and not print ----
+log.debug("atom 4 of aspirin has %d neighbours", 3)
+log.info("read %d molecules from %s", 2_000, "vendor.sdf")
+log.warning("skipped record %d: %s", 153, "valence error on atom 0")
+log.setLevel(logging.WARNING)
+log.info("read %d molecules from %s", 2_000, "vendor.sdf")
+log.warning("skipped record %d: %s", 153, "valence error on atom 0")
+log.setLevel(logging.INFO)  # back to the lesson's level
+
+# ---- 1. A molecule is a graph ----
 aspirin = Chem.MolFromSmiles("CC(=O)Oc1ccccc1C(=O)O")
 print(aspirin.GetNumAtoms(), "heavy atoms,", aspirin.GetNumBonds(), "bonds")
 for atom in list(aspirin.GetAtoms())[:5]:
     neighbours = [n.GetIdx() for n in atom.GetNeighbors()]
     print(f"atom {atom.GetIdx()}: {atom.GetSymbol()}, bonded to {neighbours}")
-import networkx as nx
-
-
-def to_graph(mol):
+def to_graph(mol: Chem.Mol) -> nx.Graph:
     """A molecule as a NetworkX graph: atoms as nodes, bonds as edges, each with its properties."""
     g = nx.Graph()
     for atom in mol.GetAtoms():
@@ -54,9 +77,6 @@ print("rings:", [sorted(ring) for ring in nx.cycle_basis(graph)])
 print("bonds between the two carbonyl carbons:", nx.shortest_path_length(graph, 1, 10))
 
 # ---- 2. Molecules as matrices ----
-import numpy as np
-import pandas as pd
-
 acetic_acid = Chem.MolFromSmiles("CC(=O)O")
 g = to_graph(acetic_acid)
 atoms = sorted(g)
@@ -70,10 +90,8 @@ print("same as RDKit's:", bool((adjacency == Chem.GetAdjacencyMatrix(acetic_acid
 # ---- Encoding a molecule's properties ----
 orders = nx.to_numpy_array(g, nodelist=atoms, weight="order")
 print(pd.DataFrame(orders, index=labels, columns=labels))
-ELEMENTS = ["C", "N", "O"]
-
-
-def atom_features(data):
+def atom_features(data: dict) -> list[int]:
+    """One row of the atom feature matrix: one-hot element, then hydrogens, charge, aromatic."""
     element = [int(data["element"] == e) for e in ELEMENTS]
     other = int(data["element"] not in ELEMENTS)
     return [*element, other, data["hydrogens"], data["charge"], int(data["aromatic"])]
@@ -82,7 +100,6 @@ def atom_features(data):
 columns = [*ELEMENTS, "other", "hydrogens", "charge", "aromatic"]
 X = np.array([atom_features(g.nodes[i]) for i in atoms])
 print(pd.DataFrame(X, index=labels, columns=columns))
-BOND_TYPES = ["SINGLE", "DOUBLE", "TRIPLE", "AROMATIC"]
 tensor = np.zeros((len(BOND_TYPES), len(atoms), len(atoms)), dtype=int)
 for i, j, data in g.edges(data=True):
     k = BOND_TYPES.index(data["bond_type"])

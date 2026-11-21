@@ -61,6 +61,7 @@ def setup_html(series_folder: str, meta: dict, folder: str) -> str:
 HERE = Path(__file__).parent
 CATALOGUE = HERE / "catalogue.json"
 FRAME = HERE / "templates" / "frame.html"
+JOURNEY = HERE / "journey.json"
 STATIC = HERE / "static"
 DIST = Path("dist")
 WAITLIST = "mailto:contact@monstrous.com.ng?subject=Waitlist%3A%20Learn%20with%20Monstrous%20Data"
@@ -180,6 +181,169 @@ def frame(cat: dict, path: str, title: str, description: str, body: str, current
     }.items():
         page = page.replace("{{" + key + "}}", value)
     return page
+
+
+def journeys(path: Path = JOURNEY) -> dict:
+    """The "big picture" diagrams, one per course that has one, keyed by the course's folder.
+
+    Args:
+        path: The diagrams' data file.
+
+    Returns:
+        The parsed diagrams.
+    """
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def module_link(cat: dict, t: dict, s: dict, number: int) -> str:
+    """A link to a module's lesson, or its name marked "to follow" if not yet written.
+
+    Args:
+        cat: The catalogue.
+        t: The track.
+        s: The series.
+        number: The module's number.
+
+    Returns:
+        The link (or label) as HTML.
+    """
+    m = s["modules"][number - 1]
+    label = f"Module {number}: {escape(m['title'])}"
+    lesson = lessons.folder(s["folder"], number)
+    if lesson is None:
+        return f'<span class="soon">{label} (to follow)</span>'
+    return f'<a href="{url(cat, t, s)}{lesson.name}/">{label}</a>'
+
+
+def journey_step(cat: dict, t: dict, s: dict, step: dict, number: int | None) -> tuple[str, str]:
+    """One step of the big-picture diagram: its button and its details panel.
+
+    Args:
+        cat: The catalogue.
+        t: The track.
+        s: The series.
+        step: The step's data.
+        number: Its position in the main flow (None for a lane that runs alongside every step).
+
+    Returns:
+        The button and the panel, as HTML.
+    """
+    sid = escape(step["id"])
+    badge = f'<span class="jn">{number}</span>' if number else ""
+    button = (
+        f'<button type="button" class="jstep" id="step-{sid}" data-step="{sid}" '
+        f'aria-pressed="false" aria-controls="jp-{sid}">{badge}'
+        f'<span class="jl">{escape(step["label"])}</span>'
+        f'<span class="jq">{escape(step["asks"])}</span></button>'
+    )
+    how = "".join(f"<li>{escape(x)}</li>" for x in step["how"])
+    where = "".join(f"<li>{module_link(cat, t, s, n)}</li>" for n in step["modules"])
+    nxt = f'<p class="jnext">{escape(step["next"])}</p>' if step.get("next") else ""
+    panel = f"""        <div class="jpanel" id="jp-{sid}" data-panel="{sid}" role="region"
+          aria-label="{escape(step["label"])}">
+          <h3>{badge}{escape(step["label"])}</h3>
+          <div class="jvoices">
+            <p class="jchemist"><span>The chemist asks</span>{escape(step["asks"])}</p>
+            <p class="jengineer"><span>The data engineer answers</span>{escape(step["answer"])}</p>
+          </div>
+          <dl class="jfacts">
+            <div><dt>Why</dt><dd>{escape(step["why"])}</dd></div>
+            <div><dt>How</dt><dd><ul>{how}</ul></dd></div>
+            <div><dt>Where in the course</dt><dd><ul>{where}</ul></dd></div>
+            <div><dt>When</dt><dd>{escape(step["when"])}</dd></div>
+          </dl>{nxt}
+        </div>"""
+    return button, panel
+
+
+def journey(cat: dict, t: dict, s: dict) -> str:
+    """A course's interactive big-picture diagram, or nothing if the course has none.
+
+    The steps of the main flow run in order, with the lanes (reliability, versioning, ...)
+    beneath them because they apply at every step. Every step's details are in the page, so it
+    reads without JavaScript; journey.js shows one at a time.
+
+    Args:
+        cat: The catalogue.
+        t: The track.
+        s: The series.
+
+    Returns:
+        The diagram's section, as HTML.
+    """
+    data = journeys().get(s["folder"])
+    if data is None:
+        return ""
+    flow = [journey_step(cat, t, s, st, n) for n, st in enumerate(data["stages"], start=1)]
+    lanes = [journey_step(cat, t, s, st, None) for st in data["lanes"]]
+    # the steps in rows by phase (bring it in, make it right, put it to use), kept in order
+    rows: list[tuple[str, list[str]]] = []
+    for st, (b, _) in zip(data["stages"], flow, strict=True):
+        if not rows or rows[-1][0] != st["phase"]:
+            rows.append((st["phase"], []))
+        rows[-1][1].append(f"<li>{b}</li>")
+    steps = "\n".join(
+        f'          <li class="jphase"><p class="jphase-name">{escape(name)}</p>'
+        f'<ol class="jrow">{"".join(items)}</ol></li>'
+        for name, items in rows
+    )
+    lane_buttons = "\n".join(f"          <li>{b}</li>" for b, _ in lanes)
+    panels = "\n".join(p for _, p in flow + lanes)
+    return f"""    <section class="wrap journey" id="big-picture" aria-labelledby="big-picture-h">
+      <h2 id="big-picture-h">{escape(data["title"])}</h2>
+      <div class="jproblem">
+        <p class="jtag">The problem</p>
+        <p>{escape(data["problem"])}</p>
+        <p class="jask">{escape(data["question"])}</p>
+      </div>
+      <p class="jintro">{escape(data["intro"])}</p>
+      <div class="jdiagram">
+        <p class="jtag">The path of the data</p>
+        <ol class="jflow">
+{steps}
+        </ol>
+        <p class="jtag">At every step</p>
+        <ul class="jlanes">
+{lane_buttons}
+        </ul>
+      </div>
+      <div class="jpanels" aria-live="polite">
+{panels}
+      </div>
+    </section>
+    <script type="module" src="{cat["base"]}assets/js/journey.js"></script>
+"""
+
+
+def where_it_fits(cat: dict, t: dict, s: dict, m: dict) -> str:
+    """A strip on a lesson page showing which steps of the big picture this module teaches.
+
+    Args:
+        cat: The catalogue.
+        t: The track.
+        s: The series.
+        m: The module.
+
+    Returns:
+        The strip as HTML, or nothing if the course has no diagram.
+    """
+    data = journeys().get(s["folder"])
+    if data is None:
+        return ""
+    here = url(cat, t, s)
+    items = []
+    for st in data["stages"] + data["lanes"]:
+        on = m["number"] in st["modules"]
+        cls = ' class="on"' if on else ""
+        current = ' aria-current="true"' if on else ""
+        items.append(
+            f'<li{cls}><a href="{here}#step-{escape(st["id"])}"{current}>'
+            f"{escape(st['label'])}</a></li>"
+        )
+    return f"""      <nav class="fits" aria-label="Where this module fits">
+        <p>Where this module fits in <a href="{here}#big-picture">the big picture</a></p>
+        <ol>{"".join(items)}</ol>
+      </nav>"""
 
 
 def course_card(cat: dict, t: dict, s: dict) -> str:
@@ -443,7 +607,7 @@ def course(cat: dict, i: int, k: int) -> str:
       <div class="meta">{status_chip(s)}<span class="chip">{len(s["modules"])} modules</span>
         <span class="chip">{escape(s["level"])}</span><span class="chip">Free</span></div>
     </section>
-
+{journey(cat, t, s)}
     <section class="wrap">
       <div class="split">
         <div>
@@ -518,6 +682,7 @@ def lesson_page(
       <h1>{escape(m["title"])}</h1>
       <p class="lede">{escape(summary)}</p>
       <div class="meta">{tools}</div>
+{where_it_fits(cat, t, s, m)}
     </section>
 
     <section class="wrap">
@@ -639,7 +804,11 @@ def build(out: Path = DIST) -> list[Path]:
     if root.exists():
         shutil.rmtree(root)
     shutil.copytree(STATIC, root / "assets")
-    css = (root / "assets/css/learn.css").read_bytes() + lessons.code_css().encode()
+    css = (
+        (root / "assets/css/learn.css").read_bytes()
+        + lessons.code_css().encode()
+        + (root / "assets/js/journey.js").read_bytes()
+    )
     stamp = hashlib.sha256(css).hexdigest()[:10]
     base = cat["base"]
     pages = {
@@ -702,6 +871,7 @@ def build(out: Path = DIST) -> list[Path]:
         path.parent.mkdir(parents=True, exist_ok=True)
         html = html.replace("assets/css/learn.css", f"assets/css/learn.css?v={stamp}")
         html = html.replace("assets/css/code.css", f"assets/css/code.css?v={stamp}")
+        html = html.replace("assets/js/journey.js", f"assets/js/journey.js?v={stamp}")
         path.write_text(html, encoding="utf-8", newline="\n")
     return list(pages)
 

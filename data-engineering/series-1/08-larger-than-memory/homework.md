@@ -19,7 +19,18 @@ cohort's form; the answers are published after the deadline.
    files does DuckDB's `EXPLAIN` say it scans for `WHERE band = 25`?
 5. With DuckDB on your partitioned dataset: for each vendor, how many molecules have at most 25
    heavy atoms, no halogens and a price under 50 dollars?
-6. *To think about:* a supplier sends you two billion molecules each quarter as one compressed SDF
+6. Stream `chemlib.stream(60_000, batch=6_000, start=400_000)`, damage each batch with
+   `chemlib.add_defects(batch, rate=0.03, seed=k)` (k the batch number), and keep only a `Counter`
+   of defect kinds, a `Counter` of vendors among the damaged rows, and a `deque(maxlen=4)` of each
+   batch's mean price. Which defect kind is most common, which vendor has the most damaged rows,
+   and what are the four mean prices left in the deque at the end?
+7. Build 50,000 records from `chemlib.library(50_000, seed=12)` with the `heavy_atoms` and
+   `halogens` columns of `add_columns` added, as dicts, as named tuples and as dataclasses with
+   `slots=True`. With `tracemalloc`, how many bytes per record does each take, and which line does
+   a snapshot show holding the most memory? Then make the same table compact (smallest checked
+   integer types, `float32` prices, `category` vendors): what fraction of its
+   `memory_usage(deep=True)` is left?
+8. *To think about:* a supplier sends you two billion molecules each quarter as one compressed SDF
    file, and your chemists want to filter them by descriptors and run similarity searches on
    fingerprints. How would you read the file, what would you store and in what format, how would
    you partition it, and what changes when next quarter's file arrives?

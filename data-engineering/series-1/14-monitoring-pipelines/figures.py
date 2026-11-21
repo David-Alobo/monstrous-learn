@@ -127,7 +127,7 @@ def main() -> None:
     ns = run_lesson()
     drift_histograms(ns)
     print("figures/drift-histograms.svg")
-    db = duckdb.connect(str(HERE / "work" / "monitoring.duckdb"), read_only=True)
+    db = duckdb.connect(str(HERE / ns["HISTORY_DB"]), read_only=True)  # the lesson's setting
     ns["dashboard"](db, OUT / "run-dashboard.svg")
     db.close()
     print("figures/run-dashboard.svg")

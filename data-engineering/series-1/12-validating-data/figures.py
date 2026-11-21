@@ -43,7 +43,11 @@ def lesson_namespace() -> dict:
     try:
         for kind, body, _, _ in lessonkit.blocks(text):
             if kind == "python":
-                with contextlib.redirect_stdout(io.StringIO()):
+                # quiet: what the lesson prints and logs is not wanted here
+                with (
+                    contextlib.redirect_stdout(io.StringIO()),
+                    contextlib.redirect_stderr(io.StringIO()),
+                ):
                     exec(compile(body, "lesson.md", "exec", dont_inherit=True), namespace)
     finally:
         os.chdir(here)
@@ -156,7 +160,8 @@ def failures_by_check(ns: dict) -> str:
     ax.spines[["top", "right"]].set_visible(False)
     ax.tick_params(colors=INK)
     ax.set_title("Lazy validation of one batch: failing rows per check", color=INK, fontsize=11)
-    fig.text(0.01, 0.01, "Data: the lesson's synthetic batch (chemlib structures, seeds 12-14).",
+    seeds = f"seeds {ns['COMPOUND_SEED']}-{ns['FAULT_SEED']}"
+    fig.text(0.01, 0.01, f"Data: the lesson's synthetic batch (chemlib structures, {seeds}).",
              fontsize=8, color=MUTED)  # fmt: skip
     fig.tight_layout(rect=(0, 0.04, 1, 1))
     out = io.StringIO()

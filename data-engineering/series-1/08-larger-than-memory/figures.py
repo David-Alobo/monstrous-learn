@@ -1,11 +1,15 @@
-"""Draw the figures of Module 8 (figures/*.svg): streaming against loading, and measured memory.
+"""Draw the figures of Module 8 (figures/*.svg): streaming against loading, measured memory, and
+what one record costs in each Python container.
 
 Usage (from the series folder):
-    uv run python 08-larger-than-memory/figures.py
+    uv run python 08-larger-than-memory/figures.py                      # every figure
+    uv run python 08-larger-than-memory/figures.py record-containers    # only the ones named
 
-The memory chart is measured: each point runs the lesson's two jobs (stream in batches, or load
-everything) in a fresh Python process and records the most memory that process held. The numbers
-depend on the computer, so the caption in the lesson says it is one measured run.
+The record-containers chart is measured with tracemalloc, as in the lesson's section 2; on the
+same Python version it gives the same numbers every time. The memory chart is measured: each
+point runs the lesson's two jobs (stream in batches, or load everything) in a fresh Python process
+and records the most memory that process held. The numbers depend on the computer, so the caption
+in the lesson says it is one measured run.
 """
 
 from __future__ import annotations
@@ -15,6 +19,9 @@ import sys
 import tempfile
 import threading
 import time
+import tracemalloc
+from collections import namedtuple
+from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib
@@ -28,8 +35,12 @@ from figurekit import CYAN, INK, MUTED, VIOLET  # noqa: E402
 
 OUT = Path(__file__).parent / "figures"
 SIZES = [100_000, 250_000, 500_000, 750_000, 1_000_000]
+# the same settings as the lesson's Setup block and section 3
 BATCH = 25_000
+SEED = 8
+N_RECORDS = 100_000
 ATOM = r"\[[^\]]+\]|Br|Cl|[BCNOPSFI]|[bcnops]"
+HALOGEN = r"Br|Cl|F|I"
 
 
 def _box(x: float, y: float, w: float, h: float, fill: str, label: str = "") -> str:
@@ -112,7 +123,7 @@ def _measure(mode: str, n: int) -> None:
     def add_columns(batch: pd.DataFrame) -> pd.DataFrame:
         out = batch.copy()
         out["heavy_atoms"] = out["smiles"].str.count(ATOM).astype("int16")
-        out["halogens"] = out["smiles"].str.count(r"Br|Cl|F|I").astype("int16")
+        out["halogens"] = out["smiles"].str.count(HALOGEN).astype("int16")
         return out
 
     def stream(path: str, count: int) -> None:
@@ -179,14 +190,91 @@ def memory_use() -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _container_costs() -> dict[str, float]:
+    """Bytes per record for the lesson's 100,000 records in four containers, from tracemalloc.
+
+    Returns:
+        Container name -> bytes per record (including the list's pointer to it).
+    """
+    import chemlib
+
+    source = chemlib.library(N_RECORDS, seed=SEED)
+    fields = list(source.columns)
+    rows = list(zip(*(source[name].tolist() for name in fields), strict=True))
+    molecule = namedtuple("Molecule", fields)
+
+    @dataclass(frozen=True)
+    class MoleculeRecord:
+        id: str
+        smiles: str
+        vendor: str
+        price_usd: float
+        stock_mg: int
+
+    @dataclass(frozen=True, slots=True)
+    class SlottedRecord:
+        id: str
+        smiles: str
+        vendor: str
+        price_usd: float
+        stock_mg: int
+
+    containers = {
+        "dict": lambda row: dict(zip(fields, row, strict=True)),
+        "dataclass": lambda row: MoleculeRecord(*row),
+        "named tuple": molecule._make,
+        "dataclass, slots": lambda row: SlottedRecord(*row),
+    }
+    costs = {}
+    for name, build in containers.items():
+        tracemalloc.start()
+        made = [build(row) for row in rows]
+        current, _ = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        costs[name] = current / len(made)
+    return costs
+
+
+def record_containers() -> str:
+    """Bar chart: bytes per record in each container, measured with tracemalloc."""
+    costs = _container_costs()
+    plt.rcParams.update({"svg.hashsalt": "module-8", "svg.fonttype": "none", "font.size": 11})
+    fig, ax = plt.subplots(figsize=(6.4, 2.9))
+    names = list(costs)[::-1]  # largest at the top
+    values = [costs[n] for n in names]
+    colours = [CYAN if n == "dataclass, slots" else VIOLET if n == "dict" else MUTED for n in names]
+    bars = ax.barh(names, values, color=colours, height=0.6)
+    for bar, value in zip(bars, values, strict=True):
+        ax.text(value + 3, bar.get_y() + bar.get_height() / 2, f"{value:.0f}", va="center",
+                color=INK)  # fmt: skip
+    ax.set_xlabel(f"bytes per record ({N_RECORDS:,} catalogue records, Python 3.11)")
+    ax.set_xlim(0, max(values) * 1.15)
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.tick_params(axis="y", length=0)
+    fig.tight_layout()
+    path = OUT / "record-containers.svg"
+    fig.savefig(path, format="svg", metadata={"Date": None})
+    plt.close(fig)
+    return path.read_text(encoding="utf-8")
+
+
 def main() -> None:
-    """Write every figure (or, with --measure, take one measurement for the memory chart)."""
+    """Write every figure, or those named on the command line.
+
+    With --measure, take one measurement for the memory chart instead (run in a fresh process).
+    """
     if "--measure" in sys.argv:
         _measure(sys.argv[2], int(sys.argv[3]))
         return
     OUT.mkdir(exist_ok=True)
-    figures = {"stream-vs-load": stream_vs_load, "memory-use": memory_use}
-    for name, make in figures.items():
+    figures = {
+        "stream-vs-load": stream_vs_load,
+        "memory-use": memory_use,
+        "record-containers": record_containers,
+    }
+    wanted = sys.argv[1:] or list(figures)
+    for name in wanted:
+        make = figures[name]
         (OUT / f"{name}.svg").write_text(make(), encoding="utf-8")
         print(f"figures/{name}.svg")
 

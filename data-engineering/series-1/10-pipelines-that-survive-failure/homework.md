@@ -25,3 +25,9 @@ cohort's form; the answers are published after the deadline.
    second team never reads a half-written file and never processes a batch twice, even when your
    run crashes and is resumed. Which of the ideas in this module do you need, and what is left that
    the second team has to do on their side?
+7. **To think about.** You start a run of two million molecules on your group's server, inside
+   tmux and under a 32 GB memory limit, and go home. Next morning the session is gone and the log
+   ends at batch 1,412 with no error message. List the likely causes, say which line of which log
+   (yours or the system's, for example `journalctl --user`) would tell them apart, and write the
+   exact commands you would run to carry on, so the final tables equal those of a run that never
+   stopped.

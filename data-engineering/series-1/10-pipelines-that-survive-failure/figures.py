@@ -24,8 +24,8 @@ sys.path.insert(0, str(Path(__file__).parents[1]))  # the series folder, for fig
 from figurekit import CYAN, INK, MUTED, VIOLET  # noqa: E402
 
 OUT = Path(__file__).parent / "figures"
-N_BATCHES, CRASH_AT = 13, 7
-FIRST_DELAY, MAX_DELAY = 0.5, 30.0
+N_BATCHES, CRASH_AT_BATCH = 13, 7  # as in the lesson: 12,060 records in batches of 1,000
+FIRST_DELAY_S, MAX_DELAY_S = 0.5, 30.0  # the lesson's Setup constants
 FONT = 'font-family="sans-serif"'
 
 
@@ -78,25 +78,26 @@ def crash_resume() -> str:
     parts.append(_text(16, y1 + 20, "Run 1", 15, INK, weight="600"))
     parts.append(_text(16, y1 + 38, "crashes", 12, MUTED))
     for k in range(N_BATCHES):
-        if k < CRASH_AT:
+        if k < CRASH_AT_BATCH:
             parts.append(box(k, y1, done))
-        elif k == CRASH_AT:
+        elif k == CRASH_AT_BATCH:
             parts.append(box(k, y1, saved))
         else:
             parts.append(box(k, y1, empty, MUTED))
-    cx = left + CRASH_AT * (cell + gap) + cell + gap / 2
+    cx = left + CRASH_AT_BATCH * (cell + gap) + cell + gap / 2
     parts.append(f'<line x1="{cx}" y1="{y1 - 8}" x2="{cx}" y2="{y1 + cell + 8}" '
                  f'stroke="#d6336c" stroke-width="3"/>')  # fmt: skip
-    crash_label = "crash: rows of batch 7 saved, checkpoint not"
-    parts.append(_text(left + CRASH_AT * (cell + gap), y1 + cell + 22, crash_label, 12, "#d6336c"))
+    crash_label = f"crash: rows of batch {CRASH_AT_BATCH} saved, checkpoint not"
+    crash_x = left + CRASH_AT_BATCH * (cell + gap)
+    parts.append(_text(crash_x, y1 + cell + 22, crash_label, 12, "#d6336c"))
     # run 2: skips the checkpointed batches, repeats the crashed one, finishes the rest
     y2 = 150
     parts.append(_text(16, y2 + 20, "Run 2", 15, INK, weight="600"))
     parts.append(_text(16, y2 + 38, "resumes", 12, MUTED))
     for k in range(N_BATCHES):
-        parts.append(box(k, y2, skipped if k < CRASH_AT else done,
-                         MUTED if k < CRASH_AT else "#ffffff"))  # fmt: skip
-    rx = left + CRASH_AT * (cell + gap)
+        parts.append(box(k, y2, skipped if k < CRASH_AT_BATCH else done,
+                         MUTED if k < CRASH_AT_BATCH else "#ffffff"))  # fmt: skip
+    rx = left + CRASH_AT_BATCH * (cell + gap)
     parts.append(_text(rx, y2 + cell + 22, "batch 7 runs again; the upsert keeps one copy",
                        12, INK))  # fmt: skip
     # key
@@ -121,7 +122,7 @@ def backoff() -> str:
     plt.rcParams["svg.hashsalt"] = "module-10"
     plt.rcParams["svg.fonttype"] = "none"
     attempts = np.arange(1, 9)
-    ceiling = np.minimum(MAX_DELAY, FIRST_DELAY * 2.0 ** (attempts - 1))
+    ceiling = np.minimum(MAX_DELAY_S, FIRST_DELAY_S * 2.0 ** (attempts - 1))
     rng = np.random.default_rng(10)
     fig, ax = plt.subplots(figsize=(7.2, 3.8))
     for n, top in zip(attempts, ceiling, strict=True):

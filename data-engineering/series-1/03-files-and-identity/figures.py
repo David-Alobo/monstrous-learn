@@ -31,6 +31,11 @@ import chemlib  # noqa: E402
 from figurekit import CYAN, INK, MUTED, VIOLET, options  # noqa: E402
 
 OUT = Path(__file__).parent / "figures"
+# the lesson's Setup settings that the figures depend on
+LIBRARY_SIZE = 20_000
+LIBRARY_SEED = 3
+PARQUET_COMPRESSION = "zstd"
+TOOLKIT_SAMPLE = 1_000
 SCHEMA = pa.schema(
     [
         ("id", pa.string()),
@@ -40,10 +45,10 @@ SCHEMA = pa.schema(
         ("stock_mg", pa.int64()),
     ]
 )
-# the first pair of symmetric duplicates the lesson finds in chemlib.library(20_000, seed=3)
+# the first pair of symmetric duplicates the lesson finds in the library
 DUPLICATE_IDS = ["ML-00868944", "ML-00869234"]
-# the lesson reads the first 1,000 molecules with both toolkits and prints the last
-TOOLKIT_ROW = 999
+# the lesson reads the first TOOLKIT_SAMPLE molecules with both toolkits and prints the last
+TOOLKIT_ROW = TOOLKIT_SAMPLE - 1
 
 
 def _write_formats(folder: Path) -> dict[str, int]:
@@ -55,7 +60,7 @@ def _write_formats(folder: Path) -> dict[str, int]:
     Returns:
         The size of each file in bytes, by format.
     """
-    library = chemlib.library(20_000, seed=3)
+    library = chemlib.library(LIBRARY_SIZE, seed=LIBRARY_SEED)
     sdf, smi = folder / "library.sdf", folder / "library.smi"
     csv, parquet = folder / "library.csv", folder / "library.parquet"
     with Chem.SDWriter(str(sdf)) as writer:
@@ -74,7 +79,7 @@ def _write_formats(folder: Path) -> dict[str, int]:
             handle.write(f"{row.smiles} {row.id}\n")
     library.to_csv(csv, index=False)
     table = pa.Table.from_pandas(library, schema=SCHEMA, preserve_index=False)
-    pq.write_table(table, parquet, compression="zstd")
+    pq.write_table(table, parquet, compression=PARQUET_COMPRESSION)
     paths = {"SDF": sdf, "SDF (gzip)": packed, "CSV": csv, "SMILES": smi, "Parquet": parquet}
     return {name: path.stat().st_size for name, path in paths.items()}
 
@@ -109,7 +114,7 @@ def file_sizes() -> str:
 
 def duplicate_group() -> str:
     """Two library entries, two IDs and two SMILES, one molecule: one InChIKey."""
-    library = chemlib.library(20_000, seed=3).set_index("id")
+    library = chemlib.library(LIBRARY_SIZE, seed=LIBRARY_SEED).set_index("id")
     smiles = [library.at[i, "smiles"] for i in DUPLICATE_IDS]
     mols = [Chem.MolFromSmiles(s) for s in smiles]
     keys = {Chem.MolToInchiKey(m) for m in mols}
@@ -138,7 +143,7 @@ def duplicate_group() -> str:
 def toolkits_one_key() -> str:
     """One molecule: RDKit's and Open Babel's canonical SMILES differ, the InChIKey is one."""
     pybel.ob.obErrorLog.SetOutputLevel(0)
-    smiles = chemlib.library(20_000, seed=3)["smiles"].iloc[TOOLKIT_ROW]
+    smiles = chemlib.library(LIBRARY_SIZE, seed=LIBRARY_SEED)["smiles"].iloc[TOOLKIT_ROW]
     mol = Chem.MolFromSmiles(smiles)
     rd = Chem.MolToSmiles(mol)
     ob = pybel.readstring("smi", smiles).write("can").split("\t")[0].strip()

@@ -21,6 +21,78 @@ By the end of this module you will be able to:
 Everything here runs in a browser notebook or on any laptop: you need Python, RDKit, NetworkX,
 NumPy and pandas.
 
+## Setup
+
+Everything this lesson needs is imported and set here, so the settings can be changed in one place.
+Pipeline steps report with `log`; `print` is kept for showing you results.
+
+```python
+import logging
+
+import networkx as nx
+import numpy as np
+import pandas as pd
+from rdkit import Chem
+
+# log lines: level and message only, so the lesson's outputs are the same on every run
+# (a real job would add "%(asctime)s" to the format)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s", force=True)
+log = logging.getLogger(__name__)
+
+# elements that get their own one-hot column (section 2); every other element shares "other".
+# Add "S", "F", "Cl" and so on for a drug-like library.
+ELEMENTS = ["C", "N", "O"]
+# RDKit's bond types, one layer of the bond tensor and one edge feature each (section 2)
+BOND_TYPES = ["SINGLE", "DOUBLE", "TRIPLE", "AROMATIC"]
+```
+
+### Why log and not print
+
+A script that reads a vendor file could report its progress with `print`. Pipeline code uses the
+`logging` module instead, for four reasons:
+
+- **Every line has a level.** `DEBUG` for detail while you develop, `INFO` for what a job did,
+  `WARNING` for records it skipped, `ERROR` for failures. You choose how much to see by setting a
+  level, without editing the code: everything while developing, warnings only in a nightly job.
+- **Every line says where it came from.** Each logger has a name (usually the module it is in), and
+  a real job adds a timestamp to every line, so you can tell which step wrote what, and when.
+- **One line can go to many places.** Add handlers and the same line goes to the screen, a file
+  and a monitoring system at once. `print` only reaches the screen, and when a job runs unattended
+  overnight nobody is watching the screen.
+- **Libraries already log.** RDKit, requests and Dask report through logging (or can be made to:
+  Module 6 does it for RDKit, and shows how to turn its messages down or off), so your messages
+  sit alongside theirs and are controlled the same way.
+
+`print` stays useful for looking at results while you explore: a matrix, a table, a SMILES. The
+rule in this course: if a line would still be wanted when the code runs unattended as a job, it is a
+log line; if it is there to show you something, it is a print. Here are three lines at three
+levels. The level was set to `INFO` above, so the `DEBUG` line is not shown:
+
+```python
+log.debug("atom 4 of aspirin has %d neighbours", 3)
+log.info("read %d molecules from %s", 2_000, "vendor.sdf")
+log.warning("skipped record %d: %s", 153, "valence error on atom 0")
+```
+```output
+INFO read 2000 molecules from vendor.sdf
+WARNING skipped record 153: valence error on atom 0
+```
+
+Raise the level to `WARNING`, as a nightly job might, and only the warning is left. The code that
+logs has not changed:
+
+```python
+log.setLevel(logging.WARNING)
+log.info("read %d molecules from %s", 2_000, "vendor.sdf")
+log.warning("skipped record %d: %s", 153, "valence error on atom 0")
+log.setLevel(logging.INFO)  # back to the lesson's level
+```
+```output
+WARNING skipped record 153: valence error on atom 0
+```
+
+Module 14 builds on this to monitor whole pipelines.
+
 ## 1. A molecule is a graph
 
 To RDKit, a molecule is a graph: **atoms are nodes and bonds are edges**. Hydrogens are usually
@@ -30,8 +102,6 @@ order RDKit reads it:
 ![Aspirin drawn by RDKit with every atom numbered](figures/aspirin-atoms.svg)
 
 ```python
-from rdkit import Chem
-
 aspirin = Chem.MolFromSmiles("CC(=O)Oc1ccccc1C(=O)O")
 print(aspirin.GetNumAtoms(), "heavy atoms,", aspirin.GetNumBonds(), "bonds")
 for atom in list(aspirin.GetAtoms())[:5]:
@@ -54,10 +124,7 @@ into numbers.
 ![Aspirin as a graph: atoms as circles, bonds as lines](figures/aspirin-graph.svg)
 
 ```python
-import networkx as nx
-
-
-def to_graph(mol):
+def to_graph(mol: Chem.Mol) -> nx.Graph:
     """A molecule as a NetworkX graph: atoms as nodes, bonds as edges, each with its properties."""
     g = nx.Graph()
     for atom in mol.GetAtoms():
@@ -100,9 +167,6 @@ them straight from the graph. The **adjacency matrix** has one row and one colum
 checked against RDKit's own:
 
 ```python
-import numpy as np
-import pandas as pd
-
 acetic_acid = Chem.MolFromSmiles("CC(=O)O")
 g = to_graph(acetic_acid)
 atoms = sorted(g)
@@ -154,13 +218,12 @@ One number per cell can carry one property only, so the other properties go besi
 
 **2. An atom feature matrix.** One row per atom, one column per property. Numbers (charge,
 hydrogens) go in as numbers; categories (the element) are **one-hot encoded**, one column per
-category with a 1 in the right one, so that a model never reads "oxygen = 8" as "more than carbon":
+category with a 1 in the right one, so that a model never reads "oxygen = 8" as "more than carbon".
+The elements that get a column are `ELEMENTS`, set in the Setup block:
 
 ```python
-ELEMENTS = ["C", "N", "O"]
-
-
-def atom_features(data):
+def atom_features(data: dict) -> list[int]:
+    """One row of the atom feature matrix: one-hot element, then hydrogens, charge, aromatic."""
     element = [int(data["element"] == e) for e in ELEMENTS]
     other = int(data["element"] not in ELEMENTS)
     return [*element, other, data["hydrogens"], data["charge"], int(data["aromatic"])]
@@ -180,10 +243,10 @@ O3  0  0  1      0          1       0         0
 
 **3. A bond tensor: one adjacency matrix per bond type.** Stack one matrix for single bonds, one
 for double, one for triple, one for aromatic. Each "layer" is an ordinary adjacency matrix, and
-together they say exactly which kind of bond joins which atoms:
+together they say exactly which kind of bond joins which atoms (the layers are `BOND_TYPES`, from
+the Setup block):
 
 ```python
-BOND_TYPES = ["SINGLE", "DOUBLE", "TRIPLE", "AROMATIC"]
 tensor = np.zeros((len(BOND_TYPES), len(atoms), len(atoms)), dtype=int)
 for i, j, data in g.edges(data=True):
     k = BOND_TYPES.index(data["bond_type"])
@@ -350,5 +413,6 @@ code above. Answers are published after the cohort's deadline.
   drug discovery: a review and practical guide. *Journal of Cheminformatics*, 12, 56.
   <https://doi.org/10.1186/s13321-020-00460-5>
 - The NetworkX documentation. <https://networkx.org/documentation/stable/>
+- The Python documentation. *Logging HOWTO*. <https://docs.python.org/3/howto/logging.html>
 - The RDKit documentation. *Getting Started with the RDKit in Python*.
   <https://www.rdkit.org/docs/GettingStartedInPython.html>

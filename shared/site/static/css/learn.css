@@ -184,3 +184,69 @@ a.course:hover { border-color: var(--violet); transform: translateY(-2px); }
 .lesson .setup .hl { border-radius: 10px; margin: 0.4rem 0 0.8rem; }
 .lesson .downloads { display: flex; flex-wrap: wrap; gap: 10px; margin: 0.8rem 0 0; }
 .lesson .downloads .btn { font-size: 0.88rem; padding: 0.55rem 1rem; }
+
+/* ---- the big picture: a chemist thinking like a data engineer (journey.js) ---- */
+.journey { padding-top: 0.6rem; }
+.journey h2 { margin: 0 0 0.6rem; }
+.jintro { max-width: 52rem; margin: 0 0 1.4rem; }
+.jdiagram { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 1.2rem 1.2rem 1.4rem; }
+.jtag { font: 500 0.74rem var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); margin: 0 0 0.7rem; }
+.jflow, .jlanes, .jrow { list-style: none; margin: 0; padding: 0; }
+.jflow { display: grid; gap: 26px; margin-bottom: 1.4rem; }
+.jphase { position: relative; display: grid; grid-template-columns: 7.5rem 1fr; gap: 12px; align-items: center; }
+/* a down arrow from one phase to the next */
+.jphase:not(:last-child)::after { content: "↓"; position: absolute; left: calc(7.5rem + 12px + 50%); bottom: -24px; transform: translateX(-50%); color: var(--violet); font: 600 1rem var(--mono); }
+.jphase-name { margin: 0; font: 600 0.8rem var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--violet); }
+.jrow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
+.jrow li { position: relative; display: flex; }
+/* an arrow from each step to the next in its row */
+.jrow li:not(:last-child)::after { content: "→"; position: absolute; right: -21px; top: 50%; transform: translateY(-50%); color: var(--violet); font: 600 1rem var(--mono); pointer-events: none; }
+.jlanes { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; padding-top: 0.9rem; border-top: 1px dashed var(--line); }
+.jlanes li { display: flex; }
+.jstep { scroll-margin-top: 90px; flex: 1; display: flex; flex-direction: column; gap: 4px; text-align: left; font: inherit; color: var(--ink-2); background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 0.75rem 0.85rem; cursor: default; }
+.jlanes .jstep { border-left: 3px solid var(--cyan); }
+.jstep .jn { display: inline-grid; place-items: center; width: 1.5rem; height: 1.5rem; border-radius: 50%; background: rgb(139 92 246 / .18); color: var(--violet); font: 600 0.78rem var(--mono); }
+.jstep .jl { font: 600 1rem var(--heading); color: var(--ink); }
+.jstep .jq { font-size: 0.84rem; line-height: 1.4; color: var(--ink-3); font-style: italic; }
+.journey.live .jstep { cursor: pointer; transition: border-color .15s, background .15s; }
+.journey.live .jstep:hover { border-color: var(--violet); }
+.journey.live .jstep[aria-pressed="true"] { border-color: var(--violet); background: rgb(139 92 246 / .14); box-shadow: 0 0 0 1px var(--violet), 0 10px 30px -14px rgb(139 92 246 / .8); }
+.journey.live .jlanes .jstep[aria-pressed="true"] { border-color: var(--cyan); background: rgb(34 211 238 / .1); box-shadow: 0 0 0 1px var(--cyan); }
+.jstep:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.jpanels { margin-top: 1rem; display: grid; gap: 1rem; }
+.jpanel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 1.2rem 1.3rem; }
+.jpanel h3 { display: flex; align-items: center; gap: 10px; margin: 0 0 0.9rem; font-size: 1.3rem; }
+.jpanel h3 .jn { display: inline-grid; place-items: center; width: 1.7rem; height: 1.7rem; border-radius: 50%; background: rgb(139 92 246 / .18); color: var(--violet); font: 600 0.85rem var(--mono); }
+.jvoices { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 1rem; }
+.jvoices p { margin: 0; padding: 0.8rem 0.95rem; border-radius: 12px; background: var(--panel-2); color: var(--ink); }
+.jvoices span { display: block; font: 500 0.72rem var(--mono); letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 0.3rem; }
+.jchemist { border-left: 3px solid var(--violet); }
+.jchemist span { color: var(--violet); }
+.jengineer { border-left: 3px solid var(--cyan); }
+.jengineer span { color: var(--cyan); }
+.jfacts { display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem 1.6rem; margin: 0; }
+.jfacts dt { font: 600 0.95rem var(--heading); color: var(--ink); margin-bottom: 0.2rem; }
+.jfacts dd { margin: 0; font-size: 0.95rem; }
+.jfacts ul { margin: 0; padding-left: 1.1rem; }
+.jfacts .soon { color: var(--ink-3); }
+.jnext { margin: 1rem 0 0; font-size: 0.92rem; color: var(--ink-3); }
+@media (max-width: 700px) {
+  .jphase { grid-template-columns: 1fr; }
+  .jphase:not(:last-child)::after { left: 50%; }
+  .jrow { grid-template-columns: 1fr; gap: 24px; }
+  .jrow li:not(:last-child)::after { content: "↓"; right: auto; left: 50%; top: auto; bottom: -22px; transform: translateX(-50%); }
+  .jvoices, .jfacts { grid-template-columns: 1fr; }
+}
+
+/* ---- a lesson's place in the big picture ---- */
+.fits { margin-top: 1.3rem; }
+.fits p { margin: 0 0 0.5rem; font: 500 0.78rem var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+.fits ol { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; }
+.fits li a { display: inline-block; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-3); text-decoration: none; font-size: 0.82rem; }
+.fits li.on a { color: var(--ink); border-color: var(--violet); background: rgb(139 92 246 / .16); }
+.fits li a:hover { color: var(--ink); }
+.jphase > *, .jrow > li, .jlanes > li, .jstep, .jpanel, .jvoices > *, .jfacts > * { min-width: 0; }
+.jproblem { max-width: 52rem; margin: 0 0 1.2rem; padding: 1rem 1.2rem; border-left: 3px solid var(--violet); background: var(--panel); border-radius: 0 14px 14px 0; }
+.jproblem p { margin: 0 0 0.6rem; }
+.jproblem .jtag { color: var(--violet); }
+.jproblem .jask { margin: 0; font: 600 1.08rem var(--heading); color: var(--ink); }

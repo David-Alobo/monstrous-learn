@@ -30,6 +30,64 @@ and git (installed with most systems and in Colab).
 
 ![What gets versioned and how the pieces connect: a git commit pins the code and, because they are files in the repository, the lock file, the migrations, the rules and the small .dvc files that point at the data by hash; the image digest pins the operating system; a provenance record next to each result names all of them](figures/what-gets-versioned.svg)
 
+## Setup
+
+Everything this lesson needs is imported and set here, so the settings can be changed in one
+place. Pipeline steps report with `log`; `print` is kept for showing you results; Module 1
+explains why.
+
+```python
+import hashlib
+import json
+import logging
+import os
+import platform
+import re
+import shutil
+import stat
+import subprocess
+import sys
+from collections.abc import Callable
+from datetime import datetime, timezone
+from importlib import metadata
+from pathlib import Path
+
+import duckdb
+import pandas as pd
+
+import chemlib
+
+# log lines: level and message only, so the lesson's outputs are the same on every run
+# (a real job would add "%(asctime)s" to the format)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s", force=True)
+log = logging.getLogger(__name__)
+
+# where the lesson writes its files (git-ignored); change it to write somewhere else
+WORK = Path("work")
+REPO = WORK / "pipeline-code"  # the small git repository of section 1
+MIGRATIONS = WORK / "migrations"  # the numbered SQL files of section 3
+DB_PATH = WORK / "chem.duckdb"  # the database they are applied to
+DATA = WORK / "data"  # the data files of section 5
+DVC_PROJECT = WORK / "dvc-project"  # the git + DVC repository of section 5
+DVC_STORE = WORK / "dvc-store"  # the folder that stands in for a DVC remote
+RESULTS = WORK / "results"  # results and their provenance records (section 6)
+# the name and e-mail git writes on the lesson's commits, whatever your own git settings are
+GIT_NAME = "Course"
+GIT_EMAIL = "course@example.org"
+# the packages whose versions every provenance record names
+PACKAGES = ["pandas", "numpy", "duckdb", "dvc"]
+# the data: how many compounds, the seed that makes them, and how many have a price file row
+LIBRARY_SIZE = 5_000
+LIBRARY_SEED = 21
+N_PRICES = 1_000
+# files are hashed this many bytes at a time (1 MiB), so a large file is never all in memory
+HASH_CHUNK_BYTES = 1 << 20
+# the run parameter of section 6: the smallest stock, in mg, for a compound to count
+MIN_STOCK_MG = 100
+
+WORK.mkdir(exist_ok=True)
+```
+
 ## 1. Code: commits and tags
 
 Git records every version of a project as a **commit**, named by a hash of its contents and
@@ -42,21 +100,12 @@ every computer. The helper gives git a name and e-mail for the commits, so it do
 how git is set up on your machine:
 
 ```python
-import os
-import shutil
-import stat
-import subprocess
-import sys
-from pathlib import Path
-
-WORK = Path("work")
-WORK.mkdir(exist_ok=True)
-
-
 def remove_tree(path: Path) -> None:
     """Delete a folder if it exists, including the read-only files git leaves on Windows."""
 
-    def make_writable_and_retry(func, failed_path, _error):
+    def make_writable_and_retry(func: Callable[[str], object], failed_path: str,
+                                _error: object) -> None:
+        """Make a file that could not be deleted writable, and delete it again."""
         os.chmod(failed_path, stat.S_IWRITE)
         func(failed_path)
 
@@ -69,7 +118,7 @@ def remove_tree(path: Path) -> None:
 
 def git(repo: Path, *args: str) -> str:
     """Run a git command in repo and return what it prints."""
-    identity = ["-c", "user.name=Course", "-c", "user.email=course@example.org"]
+    identity = ["-c", f"user.name={GIT_NAME}", "-c", f"user.email={GIT_EMAIL}"]
     result = subprocess.run(
         ["git", *identity, "-c", "core.autocrlf=false", *args],  # keep files byte for byte
         cwd=repo, capture_output=True, text=True, check=True,
@@ -77,16 +126,15 @@ def git(repo: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
-repo = WORK / "pipeline-code"
-remove_tree(repo)
-repo.mkdir()
-git(repo, "init", "--quiet", "--initial-branch=main")
+remove_tree(REPO)
+REPO.mkdir()
+git(REPO, "init", "--quiet", "--initial-branch=main")
 version_1 = 'def to_nm(value, units):\n    return value * {"nM": 1, "uM": 1_000}[units]\n'
-(repo / "convert.py").write_text(version_1, encoding="utf-8", newline="\n")
-git(repo, "add", "convert.py")
-git(repo, "commit", "--quiet", "-m", "Convert activities to nM")
-git(repo, "tag", "v1.0.0")
-print("version:", git(repo, "describe", "--tags", "--always", "--dirty"))
+(REPO / "convert.py").write_text(version_1, encoding="utf-8", newline="\n")
+git(REPO, "add", "convert.py")
+git(REPO, "commit", "--quiet", "-m", "Convert activities to nM")
+git(REPO, "tag", "v1.0.0")
+print("version:", git(REPO, "describe", "--tags", "--always", "--dirty"))
 ```
 ```output
 version: v1.0.0
@@ -97,8 +145,8 @@ the tagged commit; when the code has been changed and not committed, it adds `-d
 
 ```python
 version_2 = version_1.replace('"uM": 1_000', '"µM": 1_000, "mM": 1_000_000')
-(repo / "convert.py").write_text(version_2, encoding="utf-8", newline="\n")
-print("after an edit:", git(repo, "describe", "--tags", "--always", "--dirty"))
+(REPO / "convert.py").write_text(version_2, encoding="utf-8", newline="\n")
+print("after an edit:", git(REPO, "describe", "--tags", "--always", "--dirty"))
 ```
 ```output
 after an edit: v1.0.0-dirty
@@ -109,14 +157,12 @@ edit. A careful pipeline refuses to write results from dirty code, or at least s
 every result it writes. Commit the change, and the name says how far the code is from the tag:
 
 ```python
-import re
-
-git(repo, "commit", "--quiet", "-am", "Accept µM and mM")
-described = git(repo, "describe", "--tags", "--always", "--dirty")
-commit = git(repo, "rev-parse", "HEAD")
+git(REPO, "commit", "--quiet", "-am", "Accept µM and mM")
+described = git(REPO, "describe", "--tags", "--always", "--dirty")
+commit = git(REPO, "rev-parse", "HEAD")
 print("after a commit:", re.sub(r"g[0-9a-f]+$", "g<commit>", described))
 print("a commit's full name is", len(commit), "hexadecimal characters")
-print("v1.0.0 is still there:", git(repo, "show", "v1.0.0:convert.py") + "\n" == version_1)
+print("v1.0.0 is still there:", git(REPO, "show", "v1.0.0:convert.py") + "\n" == version_1)
 ```
 ```output
 after a commit: v1.0.0-1-g<commit>
@@ -173,16 +219,10 @@ uv sync --locked   # install exactly uv.lock, or fail if it is out of date
 
 A lock file says what *should* be installed. What *was* installed when a result was made is
 another question (someone ran `pip install --upgrade` in the environment last week), so a
-pipeline records it while it runs, with `importlib.metadata` from the standard library:
+pipeline records it while it runs, with `importlib.metadata` from the standard library
+(imported in the Setup block):
 
 ```python
-import json
-import platform
-from importlib import metadata
-
-PACKAGES = ["pandas", "numpy", "duckdb", "dvc"]
-
-
 def environment(packages: list[str]) -> dict[str, str]:
     """The Python version and the installed version of each package, as they are right now."""
     return {"python": platform.python_version(), **{p: metadata.version(p) for p in packages}}
@@ -190,8 +230,9 @@ def environment(packages: list[str]) -> dict[str, str]:
 
 print(json.dumps(environment(PACKAGES), indent=2))
 everything = sorted(f"{d.metadata['Name']}=={d.version}" for d in metadata.distributions())
-(WORK / "installed.txt").write_text("\n".join(everything) + "\n", encoding="utf-8")
-print(len(everything), "packages installed in all, written to work/installed.txt")
+installed = WORK / "installed.txt"
+installed.write_text("\n".join(everything) + "\n", encoding="utf-8")
+log.info("wrote %d installed packages to %s", len(everything), installed.as_posix())
 ```
 ```output varies
 {
@@ -201,7 +242,7 @@ print(len(everything), "packages installed in all, written to work/installed.txt
   "duckdb": "2.0.0",
   "dvc": "3.67.1"
 }
-140 packages installed in all, written to work/installed.txt
+INFO wrote 140 installed packages to work/installed.txt
 ```
 
 Your versions will differ from these, which is the point: without the record nobody can tell.
@@ -243,19 +284,13 @@ order, and recorded in a table in the database itself. Applying them is then ide
 this for large projects; the idea fits in one function.
 
 ```python
-import hashlib
-
-import duckdb
-
-
 def sha256_text(text: str) -> str:
     """The SHA-256 hash of a text, as 64 hexadecimal characters."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-migrations = WORK / "migrations"
-remove_tree(migrations)
-migrations.mkdir()
+remove_tree(MIGRATIONS)
+MIGRATIONS.mkdir()
 FIRST_MIGRATIONS = {
     "0001_create_compounds.sql": (
         "CREATE TABLE compounds (\n"
@@ -275,7 +310,7 @@ FIRST_MIGRATIONS = {
     "0003_add_pchembl.sql": "ALTER TABLE measurements ADD COLUMN pchembl DOUBLE;\n",
 }
 for name, sql in FIRST_MIGRATIONS.items():
-    (migrations / name).write_text(sql, encoding="utf-8", newline="\n")
+    (MIGRATIONS / name).write_text(sql, encoding="utf-8", newline="\n")
 
 
 def migrate(db: duckdb.DuckDBPyConnection, folder: Path) -> list[str]:
@@ -306,19 +341,26 @@ def migrate(db: duckdb.DuckDBPyConnection, folder: Path) -> list[str]:
         except Exception:
             db.execute("ROLLBACK")
             raise
+        log.info("applied %s", path.name)
         done.append(path.name)
     return done
 
 
-db_path = WORK / "chem.duckdb"
-db_path.unlink(missing_ok=True)
-db = duckdb.connect(str(db_path))
-print("first run applied: ", migrate(db, migrations))
-print("second run applied:", migrate(db, migrations))
-print("schema version:", db.execute("SELECT max(version) FROM schema_migrations").fetchone()[0])
+def schema_version(db: duckdb.DuckDBPyConnection) -> int:
+    """The number of the last migration the database has had."""
+    return db.execute("SELECT max(version) FROM schema_migrations").fetchone()[0]
+
+
+DB_PATH.unlink(missing_ok=True)
+with duckdb.connect(str(DB_PATH)) as db:
+    migrate(db, MIGRATIONS)
+    print("second run applied:", migrate(db, MIGRATIONS))
+    print("schema version:", schema_version(db))
 ```
 ```output
-first run applied:  ['0001_create_compounds.sql', '0002_create_measurements.sql', '0003_add_pchembl.sql']
+INFO applied 0001_create_compounds.sql
+INFO applied 0002_create_measurements.sql
+INFO applied 0003_add_pchembl.sql
 second run applied: []
 schema version: 3
 ```
@@ -327,19 +369,20 @@ The second run changes nothing, so the same command is safe to run every time th
 starts. A new change is a new file with the next number; it is the only one applied:
 
 ```python
-(migrations / "0004_index_measurements_by_compound.sql").write_text(
+(MIGRATIONS / "0004_index_measurements_by_compound.sql").write_text(
     "CREATE INDEX measurements_by_compound ON measurements (compound_id);\n",
     encoding="utf-8", newline="\n",
 )
-print("applied:", migrate(db, migrations))
-columns = db.execute(
-    "SELECT column_name FROM information_schema.columns "
-    "WHERE table_name = 'measurements' ORDER BY ordinal_position"
-).fetchall()
+with duckdb.connect(str(DB_PATH)) as db:
+    migrate(db, MIGRATIONS)
+    columns = db.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_name = 'measurements' ORDER BY ordinal_position"
+    ).fetchall()
 print("measurements:", [c[0] for c in columns])
 ```
 ```output
-applied: ['0004_index_measurements_by_compound.sql']
+INFO applied 0004_index_measurements_by_compound.sql
 measurements: ['measurement_id', 'compound_id', 'target_id', 'value_nm', 'pchembl']
 ```
 
@@ -348,17 +391,18 @@ production server's) have already run the old text, and editing it would leave t
 with no record of how. The hash in `schema_migrations` catches it:
 
 ```python
-first = migrations / "0001_create_compounds.sql"
+first = MIGRATIONS / "0001_create_compounds.sql"
 first.write_text(FIRST_MIGRATIONS["0001_create_compounds.sql"].replace(
     "inchikey TEXT NOT NULL", "inchikey TEXT"), encoding="utf-8", newline="\n")
-try:
-    migrate(db, migrations)
-except RuntimeError as error:
-    print("refused:", error)
+with duckdb.connect(str(DB_PATH)) as db:
+    try:
+        migrate(db, MIGRATIONS)
+    except RuntimeError as error:
+        log.error("refused: %s", error)
 first.write_text(FIRST_MIGRATIONS["0001_create_compounds.sql"], encoding="utf-8", newline="\n")
 ```
 ```output
-refused: 0001_create_compounds.sql was changed after it was applied
+ERROR refused: 0001_create_compounds.sql was changed after it was applied
 ```
 
 To change a column that already exists, write a new migration that changes it.
@@ -434,21 +478,16 @@ We write two data files from `chemlib`. Large files are hashed in chunks, so the
 never in memory at once:
 
 ```python
-import pandas as pd
-
-import chemlib
-
-data = WORK / "data"
-remove_tree(data)
-data.mkdir()
-library = chemlib.library(5_000, seed=21)
-library.to_csv(data / "compounds.csv", index=False, lineterminator="\n")
-library[["id", "price_usd"]].head(1_000).to_csv(data / "prices.csv", index=False,
-                                                 lineterminator="\n")
+remove_tree(DATA)
+DATA.mkdir()
+library = chemlib.library(LIBRARY_SIZE, seed=LIBRARY_SEED)
+library.to_csv(DATA / "compounds.csv", index=False, lineterminator="\n")
+library[["id", "price_usd"]].head(N_PRICES).to_csv(DATA / "prices.csv", index=False,
+                                                    lineterminator="\n")
 
 
-def file_sha256(path: Path, chunk: int = 1 << 20) -> str:
-    """The SHA-256 of a file, read one chunk (1 MiB) at a time."""
+def file_sha256(path: Path, chunk: int = HASH_CHUNK_BYTES) -> str:
+    """The SHA-256 of a file, read one chunk at a time."""
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         while block := handle.read(chunk):
@@ -465,7 +504,7 @@ def build_manifest(folder: Path) -> list[dict]:
     ]
 
 
-manifest = build_manifest(data)
+manifest = build_manifest(DATA)
 (WORK / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 for entry in manifest:
     print(f"{entry['path']:14} {entry['bytes']:>8,} bytes  sha256 {entry['sha256'][:16]}...")
@@ -494,12 +533,12 @@ def check_manifest(folder: Path, manifest: list[dict]) -> list[str]:
     return problems
 
 
-print("before:", check_manifest(data, manifest))
-prices = pd.read_csv(data / "prices.csv")
+print("before:", check_manifest(DATA, manifest))
+prices = pd.read_csv(DATA / "prices.csv")
 prices.loc[0, "price_usd"] = prices.loc[0, "price_usd"] + 0.01
-prices.to_csv(data / "prices.csv", index=False, lineterminator="\n")
-print("after: ", check_manifest(data, manifest))
-new_hash = file_sha256(data / "prices.csv")
+prices.to_csv(DATA / "prices.csv", index=False, lineterminator="\n")
+print("after: ", check_manifest(DATA, manifest))
+new_hash = file_sha256(DATA / "prices.csv")
 old_hash = next(e["sha256"] for e in manifest if e["path"] == "prices.csv")
 print("old hash", old_hash[:16], "new hash", new_hash[:16])
 ```
@@ -535,21 +574,21 @@ def dvc(repo: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
-project = WORK / "dvc-project"
-remove_tree(project)
-remove_tree(WORK / "dvc-store")
-(project / "data").mkdir(parents=True)
-git(project, "init", "--quiet", "--initial-branch=main")
-dvc(project, "init", "--quiet")
-shutil.copy(data / "compounds.csv", project / "data" / "compounds.csv")
-dvc(project, "add", "data/compounds.csv")
-pointer = project / "data" / "compounds.csv.dvc"
-print(pointer.read_text(encoding="utf-8"))
-print("git ignores the data itself:", (project / "data" / ".gitignore").read_text().strip())
+remove_tree(DVC_PROJECT)
+remove_tree(DVC_STORE)
+(DVC_PROJECT / "data").mkdir(parents=True)
+git(DVC_PROJECT, "init", "--quiet", "--initial-branch=main")
+dvc(DVC_PROJECT, "init", "--quiet")
+shutil.copy(DATA / "compounds.csv", DVC_PROJECT / "data" / "compounds.csv")
+dvc(DVC_PROJECT, "add", "data/compounds.csv")
+pointer = (DVC_PROJECT / "data" / "compounds.csv.dvc").read_text(encoding="utf-8")
+ignored = (DVC_PROJECT / "data" / ".gitignore").read_text(encoding="utf-8").strip()
+print(pointer)
+print("git ignores the data itself:", ignored)
 print("the md5 is the file's own:",
-      hashlib.md5((data / "compounds.csv").read_bytes()).hexdigest() in pointer.read_text())
-git(project, "add", ".")
-git(project, "commit", "--quiet", "-m", "Track compounds.csv with DVC")
+      hashlib.md5((DATA / "compounds.csv").read_bytes()).hexdigest() in pointer)
+git(DVC_PROJECT, "add", ".")
+git(DVC_PROJECT, "commit", "--quiet", "-m", "Track compounds.csv with DVC")
 ```
 ```output
 outs:
@@ -568,13 +607,13 @@ that the team (or the paper's readers) fetch from. Here the remote is a folder, 
 needs no account anywhere:
 
 ```python
-dvc(project, "remote", "add", "--default", "store", str((WORK / "dvc-store").resolve()))
-dvc(project, "push")
-(project / "data" / "compounds.csv").unlink()
-remove_tree(project / ".dvc" / "cache")
-dvc(project, "pull")
-restored = file_sha256(project / "data" / "compounds.csv")
-print("restored from the remote, same bytes:", restored == file_sha256(data / "compounds.csv"))
+dvc(DVC_PROJECT, "remote", "add", "--default", "store", str(DVC_STORE.resolve()))
+dvc(DVC_PROJECT, "push")
+(DVC_PROJECT / "data" / "compounds.csv").unlink()
+remove_tree(DVC_PROJECT / ".dvc" / "cache")
+dvc(DVC_PROJECT, "pull")
+restored = file_sha256(DVC_PROJECT / "data" / "compounds.csv")
+print("restored from the remote, same bytes:", restored == file_sha256(DATA / "compounds.csv"))
 ```
 ```output
 restored from the remote, same bytes: True
@@ -590,10 +629,10 @@ version can come back: check out the old `.dvc` file with git, and `dvc checkout
 matching data in place.
 
 ```python
-changed = pd.read_csv(project / "data" / "compounds.csv").head(4_000)  # 1,000 rows withdrawn
-changed.to_csv(project / "data" / "compounds.csv", index=False, lineterminator="\n")
-dvc(project, "add", "data/compounds.csv")
-git(project, "commit", "--quiet", "-am", "Withdraw 1,000 compounds")
+changed = pd.read_csv(DVC_PROJECT / "data" / "compounds.csv").head(4_000)  # 1,000 withdrawn
+changed.to_csv(DVC_PROJECT / "data" / "compounds.csv", index=False, lineterminator="\n")
+dvc(DVC_PROJECT, "add", "data/compounds.csv")
+git(DVC_PROJECT, "commit", "--quiet", "-am", "Withdraw 1,000 compounds")
 
 
 def tracked_md5(project: Path) -> str:
@@ -607,12 +646,12 @@ def rows(project: Path) -> int:
     return len(pd.read_csv(project / "data" / "compounds.csv"))
 
 
-print("now: ", tracked_md5(project), rows(project), "rows")
-git(project, "checkout", "--quiet", "HEAD~1", "--", "data/compounds.csv.dvc")
-dvc(project, "checkout")
-print("back:", tracked_md5(project), rows(project), "rows")
-git(project, "checkout", "--quiet", "HEAD", "--", "data/compounds.csv.dvc")
-dvc(project, "checkout")
+print("now: ", tracked_md5(DVC_PROJECT), rows(DVC_PROJECT), "rows")
+git(DVC_PROJECT, "checkout", "--quiet", "HEAD~1", "--", "data/compounds.csv.dvc")
+dvc(DVC_PROJECT, "checkout")
+print("back:", tracked_md5(DVC_PROJECT), rows(DVC_PROJECT), "rows")
+git(DVC_PROJECT, "checkout", "--quiet", "HEAD", "--", "data/compounds.csv.dvc")
+dvc(DVC_PROJECT, "checkout")
 ```
 ```output
 now:  c118af6987c871d874c832a0068486ab 4000 rows
@@ -633,9 +672,6 @@ given amount in stock. The function that writes it writes the record beside it, 
 name and `.provenance.json` on the end:
 
 ```python
-from datetime import datetime, timezone
-
-
 def median_price_by_vendor(compounds: Path, min_stock_mg: int) -> pd.DataFrame:
     """The median price and the number of compounds per vendor, for compounds in stock."""
     table = pd.read_csv(compounds)
@@ -648,11 +684,13 @@ def write_with_provenance(result: pd.DataFrame, path: Path, inputs: list[Path],
                           parameters: dict) -> dict:
     """Write a result as CSV and, next to it, a record of everything that made it."""
     result.to_csv(path, index=False, lineterminator="\n")
+    with duckdb.connect(str(DB_PATH), read_only=True) as db:
+        version = schema_version(db)
     record = {
         "result": {"file": path.name, "sha256": file_sha256(path)},
-        "code_version": git(repo, "describe", "--tags", "--always", "--dirty"),
+        "code_version": git(REPO, "describe", "--tags", "--always", "--dirty"),
         "environment": environment(PACKAGES),
-        "schema_version": db.execute("SELECT max(version) FROM schema_migrations").fetchone()[0],
+        "schema_version": version,
         "rules": {"version": RULES["version"], "sha256": rules_hash(RULES)},
         "inputs": {p.as_posix(): file_sha256(p) for p in inputs},
         "parameters": parameters,
@@ -660,25 +698,24 @@ def write_with_provenance(result: pd.DataFrame, path: Path, inputs: list[Path],
     }
     record_path = path.with_name(path.name + ".provenance.json")
     record_path.write_text(json.dumps(record, indent=2), encoding="utf-8")
+    log.info("wrote %s and %s", path.name, record_path.name)
     return record
 
 
-results = WORK / "results"
-remove_tree(results)
-results.mkdir()
-params = {"min_stock_mg": 100}
-summary = median_price_by_vendor(data / "compounds.csv", **params)
-record = write_with_provenance(summary, results / "median-price.csv", [data / "compounds.csv"],
+remove_tree(RESULTS)
+RESULTS.mkdir()
+params = {"min_stock_mg": MIN_STOCK_MG}
+summary = median_price_by_vendor(DATA / "compounds.csv", **params)
+record = write_with_provenance(summary, RESULTS / "median-price.csv", [DATA / "compounds.csv"],
                                params)
 print(summary.to_string(index=False))
-print("written:", sorted(p.name for p in results.iterdir()))
 ```
 ```output
+INFO wrote median-price.csv and median-price.csv.provenance.json
   vendor  median  count
 Vendor A 269.930   1351
 Vendor B 264.250   1373
 Vendor C 247.425   1370
-written: ['median-price.csv', 'median-price.csv.provenance.json']
 ```
 
 The record is plain JSON, readable by people and by code. Its environment, code version and
@@ -693,7 +730,7 @@ print(json.dumps(record, indent=2))
     "file": "median-price.csv",
     "sha256": "d078fc3080aeffd7f35220c8d32b0a251cdfe40385646db73d89b50a3dd76e7c"
   },
-  "code_version": "v1.0.0-1-g51a03c3",
+  "code_version": "v1.0.0-1-g8690c5f",
   "environment": {
     "python": "3.11.17",
     "pandas": "3.1.1",
@@ -712,7 +749,7 @@ print(json.dumps(record, indent=2))
   "parameters": {
     "min_stock_mg": 100
   },
-  "created_utc": "2026-11-20T06:27:01+00:00"
+  "created_utc": "2026-11-21T11:25:19+00:00"
 }
 ```
 
@@ -755,9 +792,9 @@ def check_provenance(record_path: Path) -> list[str]:
     return problems
 
 
-record_path = results / "median-price.csv.provenance.json"
+record_path = RESULTS / "median-price.csv.provenance.json"
 print("check:", check_provenance(record_path))
-rebuilt = median_price_by_vendor(data / "compounds.csv", **record["parameters"])
+rebuilt = median_price_by_vendor(DATA / "compounds.csv", **record["parameters"])
 rebuilt.to_csv(WORK / "rebuilt.csv", index=False, lineterminator="\n")
 print("rebuilt, same bytes:", file_sha256(WORK / "rebuilt.csv") == record["result"]["sha256"])
 ```
@@ -769,11 +806,10 @@ rebuilt, same bytes: True
 And when an input changes after the fact, the check says which:
 
 ```python
-stock = pd.read_csv(data / "compounds.csv")
+stock = pd.read_csv(DATA / "compounds.csv")
 stock.loc[stock.index[:50], "stock_mg"] = 0  # 50 compounds sold out
-stock.to_csv(data / "compounds.csv", index=False, lineterminator="\n")
+stock.to_csv(DATA / "compounds.csv", index=False, lineterminator="\n")
 print("check:", check_provenance(record_path))
-db.close()
 ```
 ```output
 check: ['input changed: work/data/compounds.csv']

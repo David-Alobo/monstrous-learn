@@ -31,22 +31,70 @@ By the end of this module you will be able to:
 You need Python with requests, tenacity, Pydantic, DuckDB and pandas. The recordings are small JSON
 files in the module's `recorded/` folder, made by `record.py`.
 
+## Setup
+
+Everything this lesson needs is imported and set here, so the settings can be changed in one place.
+Pipeline steps report with `log`; `print` is kept for showing you results; Module 1 explains why.
+The query itself, and the ids the lesson's runs use, stay with the sections that explain them.
+
 ```python
 import hashlib
 import json
+import logging
 import math
 import time
+from collections import Counter
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 import duckdb
-import pandas as pd
 import requests
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from tenacity import (
+    RetryCallState,
+    Retrying,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_random_exponential,
+)
+
+# log lines: level and message only, so the lesson's outputs are the same on every run
+# (a real job would add "%(asctime)s" to the format)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s", force=True)
+log = logging.getLogger(__name__)
 
 LIVE = False  # False: replay the recorded responses. True: call ChEMBL and PubChem for real.
-RECORDED = Path("recorded")
-CACHE = Path("work") / "http-cache"  # live responses are kept here, so a rerun asks again for nothing
-Path("work").mkdir(exist_ok=True)
+
+# files
+RECORDED = Path("recorded")  # the recorded responses (made by record.py)
+WORK = Path("work")  # every file the lesson writes goes here
+CACHE = WORK / "http-cache"  # live responses are kept here, so a rerun asks again for nothing
+DB_PATH = WORK / "ingest.duckdb"  # the database the lesson loads
+
+# being polite to the services
+USER_AGENT = "chem-ingest-tutorial/1.0 (mailto:you@example.org)"  # put your own contact here
+TIMEOUT = (10, 60)  # seconds to connect, seconds to wait for the answer
+CHEMBL_PER_SECOND = 2  # requests per second to ChEMBL (our own, conservative choice)
+PUBCHEM_PER_SECOND = 5  # requests per second to PubChem (the most its usage policy allows)
+TRANSIENT_STATUS = {429, 500, 502, 503, 504}  # HTTP statuses worth retrying
+MAX_ATTEMPTS = 5  # requests in all before a transient failure is given up
+MAX_WAIT_S = 60  # the longest wait between retries, in seconds
+
+# the services
+CHEMBL_HOST = "https://www.ebi.ac.uk"
+CHEMBL_ACTIVITY = f"{CHEMBL_HOST}/chembl/api/data/activity.json"
+PAGE_SIZE = 100  # ChEMBL records per page (its `limit`)
+PUBCHEM_PROPERTIES = ("https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cids}"
+                      "/property/Title,MolecularFormula,MolecularWeight,SMILES,InChIKey/JSON")
+CHUNK_SIZE = 5  # CIDs per PubChem request: 5 to show the chunking, hundreds in real use
+
+# the source and licence stored with every row (section 1)
+SOURCE_CHEMBL = "ChEMBL (CC BY-SA 3.0)"
+SOURCE_PUBCHEM = "PubChem (NCBI: no restrictions on use)"
+
+WORK.mkdir(exist_ok=True)
 ```
 
 ## 1. Before you download: licences
@@ -83,14 +131,11 @@ The rate limiter takes its clock and its sleep function as arguments, so here it
 clock and the lesson does not have to wait:
 
 ```python
-USER_AGENT = "chem-ingest-tutorial/1.0 (mailto:you@example.org)"  # put your own contact here
-TIMEOUT = (10, 60)  # seconds to connect, seconds to wait for the answer
-
-
 class RateLimiter:
     """Allow at most `per_second` requests per second, by waiting before a request when needed."""
 
-    def __init__(self, per_second: float, clock=time.monotonic, sleep=time.sleep):
+    def __init__(self, per_second: float, clock: Callable[[], float] = time.monotonic,
+                 sleep: Callable[[float], None] = time.sleep) -> None:
         self.interval = 1 / per_second
         self.clock = clock
         self.sleep = sleep
@@ -108,7 +153,7 @@ class RateLimiter:
 class PretendClock:
     """A clock that only moves when something sleeps: for showing waits without waiting."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.now = 0.0
 
     def time(self) -> float:
@@ -121,7 +166,7 @@ class PretendClock:
 
 
 clock = PretendClock()
-limiter = RateLimiter(per_second=5, clock=clock.time, sleep=clock.sleep)
+limiter = RateLimiter(per_second=PUBCHEM_PER_SECOND, clock=clock.time, sleep=clock.sleep)
 sent = []
 for _ in range(12):
     limiter.wait()
@@ -138,26 +183,33 @@ policy asks, and 2 per second for ChEMBL, a conservative choice of ours.
 
 Now the request itself, with tenacity retrying what is transient. The function takes the HTTP
 session as an argument so we can try it against a pretend server that answers with chosen status
-codes, first two transient failures and then success, then a 404:
+codes, first two transient failures and then success, then a 404. tenacity's `Retrying` is
+imported in the Setup block; each retry is logged as a warning, because someone reading a nightly
+job's log wants to know a service was struggling, even when it recovered:
 
 ```python
-from tenacity import Retrying, retry_if_exception_type, stop_after_attempt, wait_random_exponential
-
-TRANSIENT_STATUS = {429, 500, 502, 503, 504}
 SESSION = requests.Session()
-LIMITERS = {"www.ebi.ac.uk": RateLimiter(2), "pubchem.ncbi.nlm.nih.gov": RateLimiter(5)}
+LIMITERS = {urlsplit(CHEMBL_HOST).netloc: RateLimiter(CHEMBL_PER_SECOND),
+            urlsplit(PUBCHEM_PROPERTIES).netloc: RateLimiter(PUBCHEM_PER_SECOND)}
 
 
 class TransientHTTPError(Exception):
     """A response worth retrying: rate limited, or the server failed."""
 
 
-def polite_get(url: str, session=SESSION, limiter=None, sleep=time.sleep) -> dict:
+def log_retry(state: RetryCallState) -> None:
+    """Log a failed attempt before tenacity waits and tries again."""
+    log.warning("attempt %d failed (%s); retrying", state.attempt_number,
+                state.outcome.exception())
+
+
+def polite_get(url: str, session: Any = SESSION, limiter: RateLimiter | None = None,
+               sleep: Callable[[float], None] = time.sleep) -> dict:
     """GET a URL politely and return its JSON, retrying transient failures with back-off.
 
     Args:
         url: The full URL.
-        session: The HTTP session (a requests.Session in real use).
+        session: The HTTP session: a requests.Session, or anything with the same `get`.
         limiter: The rate limiter for the URL's service (by default, the one for its host).
         sleep: How to wait between retries.
 
@@ -173,8 +225,9 @@ def polite_get(url: str, session=SESSION, limiter=None, sleep=time.sleep) -> dic
         retry=retry_if_exception_type(
             (TransientHTTPError, requests.ConnectionError, requests.Timeout)
         ),
-        stop=stop_after_attempt(5),
-        wait=wait_random_exponential(multiplier=1, max=60),
+        stop=stop_after_attempt(MAX_ATTEMPTS),
+        wait=wait_random_exponential(multiplier=1, max=MAX_WAIT_S),
+        before_sleep=log_retry,
         sleep=sleep,
         reraise=True,
     )
@@ -191,7 +244,7 @@ def polite_get(url: str, session=SESSION, limiter=None, sleep=time.sleep) -> dic
 class PretendResponse:
     """Just enough of a requests.Response for polite_get."""
 
-    def __init__(self, status_code: int):
+    def __init__(self, status_code: int) -> None:
         self.status_code = status_code
 
     def json(self) -> dict:
@@ -207,17 +260,17 @@ class PretendResponse:
 class PretendServer:
     """Answers each request with the next status code from a list."""
 
-    def __init__(self, statuses: list[int]):
+    def __init__(self, statuses: list[int]) -> None:
         self.statuses = list(statuses)
         self.requests = 0
 
-    def get(self, url, headers, timeout):
-        """Answer one request."""
+    def get(self, url: str, headers: dict, timeout: tuple[float, float]) -> PretendResponse:
+        """Answer one request (the arguments are those of requests.Session.get, unused here)."""
         self.requests += 1
         return PretendResponse(self.statuses.pop(0))
 
 
-quiet = RateLimiter(5, clock=clock.time, sleep=clock.sleep)
+quiet = RateLimiter(PUBCHEM_PER_SECOND, clock=clock.time, sleep=clock.sleep)
 server = PretendServer([503, 429, 200])
 answer = polite_get("https://example.org/x", server, quiet, sleep=clock.sleep)
 print(f"{answer} after {server.requests} requests")
@@ -226,11 +279,13 @@ server = PretendServer([404])
 try:
     polite_get("https://example.org/x", server, quiet, sleep=clock.sleep)
 except requests.HTTPError as err:
-    print(f"not retried ({server.requests} request): {err}")
+    log.error("not retried (%d request): %s", server.requests, err)
 ```
 ```output
+WARNING attempt 1 failed (HTTP 503 from example.org); retrying
+WARNING attempt 2 failed (HTTP 429 from example.org); retrying
 {'answer': 'the data'} after 3 requests
-not retried (1 request): 404 Client Error
+ERROR not retried (1 request): 404 Client Error
 ```
 
 Servers that are overloaded sometimes say how long to wait in a `Retry-After` header; a client that
@@ -252,9 +307,6 @@ politely and keeps each response in `work/http-cache/` (a disk cache: a second l
 requests it has made before). Either way the caller gets the same JSON:
 
 ```python
-CHEMBL_HOST = "https://www.ebi.ac.uk"
-
-
 def canonical_url(url: str, params: dict | None = None) -> str:
     """One spelling for a request: an absolute URL with its query parameters sorted.
 
@@ -310,16 +362,16 @@ def fetch_json(url: str, params: dict | None = None) -> dict:
 
 recordings = sorted(RECORDED.glob("*.json"))
 size_kib = sum(p.stat().st_size for p in recordings) / 1024
-print(f"{len(recordings)} recorded responses, {size_kib:.0f} KiB in all")
+log.info("%d recorded responses, %.0f KiB in all", len(recordings), size_kib)
 ```
 ```output
-10 recorded responses, 178 KiB in all
+INFO 10 recorded responses, 178 KiB in all
 ```
 
 Live mode is not a different program: when this module was written, the whole lesson was also run
 with `LIVE = True` against the real services, and every output was the same as the replayed one
-except the last line, which reports the mode. (Once ChEMBL publishes new IKK-epsilon data, a live
-run will rightly find more records than the recordings hold.)
+except the line near the end that reports the mode. (Once ChEMBL publishes new IKK-epsilon data,
+a live run will rightly find more records than the recordings hold.)
 
 Each recording holds the URL it answers, the date it was recorded and the body, so it can be read
 and refreshed by hand. A disk cache in live mode matters for the same reason as Module 10's
@@ -333,10 +385,10 @@ ChEMBL never returns a large result in one response. Its activity endpoint retur
 starting at `offset`, plus a `page_meta` block that says
 how many records match and gives the URL of the next page. Here is our query: IC50 values with a
 pChEMBL value for IKK-epsilon, ordered by `activity_id`, 100 per page, with `only` naming the fields
-we need (smaller responses, kinder to the server):
+we need (smaller responses, kinder to the server). The page size, `PAGE_SIZE`, is set in the Setup
+block:
 
 ```python
-CHEMBL_ACTIVITY = f"{CHEMBL_HOST}/chembl/api/data/activity.json"
 QUERY = {
     "target_chembl_id": "CHEMBL3529",  # IKK-epsilon
     "standard_type": "IC50",
@@ -344,7 +396,7 @@ QUERY = {
     "order_by": "activity_id",
     "only": "activity_id,molecule_chembl_id,standard_type,standard_relation,standard_value,"
     "standard_units,pchembl_value,document_chembl_id",
-    "limit": "100",
+    "limit": str(PAGE_SIZE),
 }
 FIRST_RUN_CUTOFF = 18811464  # explained in section 6
 
@@ -384,7 +436,7 @@ did not ask for: services add fields over time, which a loader should ignore rat
 Following `next` until it is empty walks through every page:
 
 ```python
-def pages(params: dict):
+def pages(params: dict) -> Iterator[dict]:
     """Every page of a ChEMBL activity query, following page_meta.next.
 
     Args:
@@ -428,11 +480,9 @@ first person to notice would be a chemist whose model behaves strangely months l
 model** states what a record must look like; every record is checked against it before anything
 is stored. Module 12 covers Pydantic in depth; here is the model for one activity, with a chemistry
 check: pChEMBL is −log10 of the molar value, so for a value in nM it must equal 9 − log10(value).
+`BaseModel` and the other Pydantic names are imported in the Setup block.
 
 ```python
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
-
-
 class Activity(BaseModel):
     """One ChEMBL bioactivity record, as this pipeline needs it."""
 
@@ -512,12 +562,11 @@ and moves the mark. The upsert and the new mark are written in one transaction, 
 crash halfway through a run loses at most the page in flight and the next run resumes after the
 last page stored.
 
-```python
-SOURCE_CHEMBL = "ChEMBL (CC BY-SA 3.0)"
+The connection stays open across the next few sections and is closed at the end of section 9.
 
-db_path = Path("work") / "ingest.duckdb"
-db_path.unlink(missing_ok=True)
-con = duckdb.connect(str(db_path))
+```python
+DB_PATH.unlink(missing_ok=True)
+con = duckdb.connect(str(DB_PATH))
 con.execute("""
     CREATE TABLE activities (
         activity_id BIGINT PRIMARY KEY, molecule_chembl_id VARCHAR, document_chembl_id VARCHAR,
@@ -536,7 +585,7 @@ UPSERT = """
 """
 
 
-def upsert(con, activities: list[Activity]) -> None:
+def upsert(con: duckdb.DuckDBPyConnection, activities: list[Activity]) -> None:
     """Insert new activities and overwrite ones already stored (idempotent)."""
     rows = [(a.activity_id, a.molecule_chembl_id, a.document_chembl_id, a.standard_type,
              a.standard_relation, a.standard_value, a.standard_units, a.pchembl_value,
@@ -545,13 +594,13 @@ def upsert(con, activities: list[Activity]) -> None:
         con.executemany(UPSERT, rows)
 
 
-def high_water_mark(con) -> int:
+def high_water_mark(con: duckdb.DuckDBPyConnection) -> int:
     """The largest activity_id loaded so far (0 before the first run)."""
     row = con.execute("SELECT high_water_mark FROM load_state WHERE source = 'chembl'").fetchone()
     return row[0] if row else 0
 
 
-def load_increment(con, until: int | None = None) -> str:
+def load_increment(con: duckdb.DuckDBPyConnection, until: int | None = None) -> str:
     """Fetch and store every activity above the high-water mark, page by page.
 
     Args:
@@ -585,14 +634,14 @@ records without waiting months for a ChEMBL release, the lesson's first run stop
 18,811,464, as if it had run before the later records were added:
 
 ```python
-print("run 1:", load_increment(con, until=FIRST_RUN_CUTOFF))
-print("run 2:", load_increment(con))
-print("run 3:", load_increment(con))
+log.info("run 1: %s", load_increment(con, until=FIRST_RUN_CUTOFF))
+log.info("run 2: %s", load_increment(con))
+log.info("run 3: %s", load_increment(con))
 ```
 ```output
-run 1: mark 0 -> 18811464; pages: 3, records fetched: 276; stored: 276
-run 2: mark 18811464 -> 28800434; pages: 2, records fetched: 117; stored: 393
-run 3: mark 28800434 -> 28800434; pages: 1, records fetched: 0; stored: 393
+INFO run 1: mark 0 -> 18811464; pages: 3, records fetched: 276; stored: 276
+INFO run 2: mark 18811464 -> 28800434; pages: 2, records fetched: 117; stored: 393
+INFO run 3: mark 28800434 -> 28800434; pages: 1, records fetched: 0; stored: 393
 ```
 
 The second run asked only for activities above the first run's mark and found the newer ones; the
@@ -636,8 +685,13 @@ of some records, then backfill that range:
 BACKFILL = (16279324, 16354699)  # the range of activity ids to fetch again
 
 
-def backfill(con, first_id: int, last_id: int) -> int:
+def backfill(con: duckdb.DuckDBPyConnection, first_id: int, last_id: int) -> int:
     """Re-fetch and upsert every activity with an id in [first_id, last_id]; the mark is unchanged.
+
+    Args:
+        con: The DuckDB connection.
+        first_id: The first activity id of the range.
+        last_id: The last activity id of the range.
 
     Returns:
         How many records were fetched.
@@ -656,14 +710,14 @@ con.execute("UPDATE activities SET pchembl_value = NULL WHERE activity_id BETWEE
 missing = "SELECT COUNT(*) FROM activities WHERE pchembl_value IS NULL"
 print("records missing pChEMBL before the backfill:", con.execute(missing).fetchone()[0])
 mark = high_water_mark(con)
-print("records re-fetched:", backfill(con, *BACKFILL))
+log.info("records re-fetched: %d", backfill(con, *BACKFILL))
 print("records missing pChEMBL after:", con.execute(missing).fetchone()[0])
 print("high-water mark unchanged:", high_water_mark(con) == mark)
 print("rows:", con.execute("SELECT COUNT(*) FROM activities").fetchone()[0])
 ```
 ```output
 records missing pChEMBL before the backfill: 76
-records re-fetched: 76
+INFO records re-fetched: 76
 records missing pChEMBL after: 0
 high-water mark unchanged: True
 rows: 393
@@ -678,17 +732,11 @@ PubChem's PUG REST interface returns a table of properties for a comma-separated
 (PubChem's compound ids) in one request, such as
 `/rest/pug/compound/cid/2244,2519/property/MolecularFormula,MolecularWeight,SMILES,InChIKey/JSON`.
 Sending several CIDs per request means fewer requests, which is what the usage policy asks for;
-very long lists should be split into chunks (we use 5 here to show the chunking, real pipelines use
-hundreds). Incremental here means asking only for CIDs not stored yet. Note that PubChem sends the
-molecular weight as text, `"180.16"`; the model turns it into a number.
+very long lists should be split into chunks (`CHUNK_SIZE` is 5 here to show the chunking; real
+pipelines use hundreds). Incremental here means asking only for CIDs not stored yet. Note that
+PubChem sends the molecular weight as text, `"180.16"`; the model turns it into a number.
 
 ```python
-PUBCHEM_PROPERTIES = ("https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cids}"
-                      "/property/Title,MolecularFormula,MolecularWeight,SMILES,InChIKey/JSON")
-CHUNK = 5
-SOURCE_PUBCHEM = "PubChem (NCBI: no restrictions on use)"
-
-
 class Compound(BaseModel):
     """One row of a PubChem property table."""
 
@@ -709,8 +757,12 @@ con.execute("""
 """)
 
 
-def load_compounds(con, cids: list[int]) -> str:
+def load_compounds(con: duckdb.DuckDBPyConnection, cids: list[int]) -> str:
     """Fetch properties for the CIDs not stored yet, in chunks; bad records go to rejects.
+
+    Args:
+        con: The DuckDB connection.
+        cids: The PubChem compound ids wanted.
 
     Returns:
         A one-line report.
@@ -718,8 +770,8 @@ def load_compounds(con, cids: list[int]) -> str:
     stored = {row[0] for row in con.execute("SELECT cid FROM compounds").fetchall()}
     new = [cid for cid in cids if cid not in stored]
     n_requests = n_rejected = 0
-    for i in range(0, len(new), CHUNK):
-        chunk = new[i : i + CHUNK]
+    for i in range(0, len(new), CHUNK_SIZE):
+        chunk = new[i : i + CHUNK_SIZE]
         table = fetch_json(PUBCHEM_PROPERTIES.format(cids=",".join(map(str, chunk))))
         n_requests += 1
         for record in table["PropertyTable"]["Properties"]:  # a KeyError here: the API changed
@@ -727,6 +779,7 @@ def load_compounds(con, cids: list[int]) -> str:
                 c = Compound.model_validate(record)
             except ValidationError as err:
                 reason = f"{err.error_count()} problems, e.g. {err.errors()[0]['loc'][0]} missing"
+                log.warning("rejected CID %s: %s", record.get("CID"), reason)
                 con.execute("INSERT OR REPLACE INTO compound_rejects VALUES (?, ?)",
                             [record.get("CID"), reason])
                 n_rejected += 1
@@ -741,15 +794,16 @@ def load_compounds(con, cids: list[int]) -> str:
 
 CIDS_FIRST = [2244, 2519, 3672, 1983, 156391, 3033, 4091, 60823, 4594, 33613]
 CIDS_SECOND = [*CIDS_FIRST, 54678486, 5090, 2662, 999999999]
-print("run 1:", load_compounds(con, CIDS_FIRST))
-print("run 2:", load_compounds(con, CIDS_SECOND))
+log.info("run 1: %s", load_compounds(con, CIDS_FIRST))
+log.info("run 2: %s", load_compounds(con, CIDS_SECOND))
 print(con.execute("SELECT * FROM compound_rejects").df().to_string(index=False))
 print(con.execute("SELECT cid, title, formula, mol_wt FROM compounds ORDER BY cid LIMIT 5")
       .df().to_string(index=False))
 ```
 ```output
-run 1: CIDs asked for: 10, not yet stored: 10; requests: 2, rejected: 0; stored: 10
-run 2: CIDs asked for: 14, not yet stored: 4; requests: 1, rejected: 1; stored: 13
+INFO run 1: CIDs asked for: 10, not yet stored: 10; requests: 2, rejected: 0; stored: 10
+WARNING rejected CID 999999999: 5 problems, e.g. Title missing
+INFO run 2: CIDs asked for: 14, not yet stored: 4; requests: 1, rejected: 1; stored: 13
       cid                         reason
 999999999 5 problems, e.g. Title missing
  cid         title       formula  mol_wt
@@ -770,21 +824,27 @@ expect, and the fault is in one input, not in the API.
 
 Every stored row says where it came from and under which licence, so the attribution travels with
 the data into every export. Analysts and the next pipeline usually read Parquet files rather than
-the database; DuckDB writes them directly:
+the database; DuckDB writes them directly. At the end, `Counter` (from `collections`, imported in
+the Setup block) counts the requests made to each service: it counts and sorts in one step.
 
 ```python
 for table in ("activities", "compounds"):
-    path = Path("work") / f"{table}.parquet"
+    path = WORK / f"{table}.parquet"
     con.execute(f"COPY {table} TO '{path.as_posix()}' (FORMAT parquet)")
     check = con.execute(f"SELECT COUNT(*), ANY_VALUE(source) FROM '{path.as_posix()}'").fetchone()
-    print(f"{path.name}: {check[0]} rows, source: {check[1]}")
+    log.info("wrote %s: %d rows, source: %s", path.name, check[0], check[1])
 con.close()
-print(f"requests made in this lesson: {len(requests_made)}, all replayed: {not LIVE}")
+log.info("requests made in this lesson: %d, all replayed: %s", len(requests_made), not LIVE)
+per_service = Counter(urlsplit(url).netloc for url in requests_made)
+for host, n in per_service.most_common():
+    print(f"{host:26} {n}")
 ```
 ```output
-activities.parquet: 393 rows, source: ChEMBL (CC BY-SA 3.0)
-compounds.parquet: 13 rows, source: PubChem (NCBI: no restrictions on use)
-requests made in this lesson: 15, all replayed: True
+INFO wrote activities.parquet: 393 rows, source: ChEMBL (CC BY-SA 3.0)
+INFO wrote compounds.parquet: 13 rows, source: PubChem (NCBI: no restrictions on use)
+INFO requests made in this lesson: 15, all replayed: True
+www.ebi.ac.uk              12
+pubchem.ncbi.nlm.nih.gov   3
 ```
 
 For a dataset you publish (a benchmark built from ChEMBL, say), ChEMBL's ShareAlike condition

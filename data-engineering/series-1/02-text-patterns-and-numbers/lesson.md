@@ -18,11 +18,35 @@ By the end of this module you will be able to:
 - choose what to store, for which job.
 
 Everything here runs in a browser notebook or on any laptop: you need Python, RDKit and pandas.
+
+## Setup
+
+Everything this lesson needs is imported and set here, so the settings can be changed in one place.
+Pipeline steps report with `log`; `print` is kept for showing you results; Module 1 explains why.
+
+```python
+import logging
+
+import pandas as pd
+from rdkit import Chem, DataStructs
+from rdkit.Chem import AllChem, Descriptors, rdFingerprintGenerator
+
+# log lines: level and message only, so the lesson's outputs are the same on every run
+# (a real job would add "%(asctime)s" to the format)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s", force=True)
+log = logging.getLogger(__name__)
+
+# conformers (section 5): how many to generate, and the random seed that makes them repeatable
+N_CONFORMERS = 5
+CONFORMER_SEED = 42
+# Morgan fingerprints (section 7): radius 2 is ECFP4-like; 2048 bits is a common length
+MORGAN_RADIUS = 2
+MORGAN_BITS = 2048
+```
+
 We start from aspirin again:
 
 ```python
-from rdkit import Chem
-
 aspirin = Chem.MolFromSmiles("CC(=O)Oc1ccccc1C(=O)O")
 ```
 
@@ -86,7 +110,8 @@ R: [(10, 'R')] CC(C)Cc1ccc([C@@H](C)C(=O)O)cc1
 Ask for SMILES without stereochemistry, and the two collapse into one:
 
 ```python
-def flat(mol):
+def flat(mol: Chem.Mol) -> str:
+    """Canonical SMILES with the stereochemistry left out."""
     return Chem.MolToSmiles(mol, isomericSmiles=False)
 
 
@@ -182,13 +207,12 @@ it is much larger: Module 3 measures what each format costs.
 ## 5. Three dimensions: conformers
 
 Real molecules are three-dimensional and flexible. RDKit can generate 3D shapes (conformers), but
-one molecule has many, and which you get depends on the method and the random seed:
+one molecule has many, and which you get depends on the method and the random seed (both set in
+the Setup block). `AllChem` holds RDKit's 3D tools:
 
 ```python
-from rdkit.Chem import AllChem
-
 with_h = Chem.AddHs(aspirin)
-ids = AllChem.EmbedMultipleConfs(with_h, numConfs=5, randomSeed=42)
+ids = AllChem.EmbedMultipleConfs(with_h, numConfs=N_CONFORMERS, randomSeed=CONFORMER_SEED)
 print(len(ids), "conformers of", with_h.GetNumAtoms(), "atoms (hydrogens included)")
 print(
     "same atoms, different coordinates:",
@@ -241,17 +265,15 @@ searches inside the database.
 
 To compare thousands of molecules quickly, we turn each into a **fingerprint**, a fixed-length
 string of bits. A Morgan (circular, ECFP-like) fingerprint looks at every atom's surroundings out to
-a radius, and sets a bit for each environment it finds. Similar molecules share many bits:
+a radius, and sets a bit for each environment it finds (the radius and length are set in the Setup
+block). Similar molecules share many bits:
 
 ![Morgan fingerprint bits of aspirin and salicylic acid, with the bits they share marked](figures/fingerprint-bits.svg)
 
 ```python
-from rdkit import DataStructs
-from rdkit.Chem import rdFingerprintGenerator
-
-morgan = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
+morgan = rdFingerprintGenerator.GetMorganGenerator(radius=MORGAN_RADIUS, fpSize=MORGAN_BITS)
 fingerprints = {name: morgan.GetFingerprint(mol) for name, mol in library.items()}
-print("bits set in aspirin:", fingerprints["aspirin"].GetNumOnBits(), "of 2048")
+print("bits set in aspirin:", fingerprints["aspirin"].GetNumOnBits(), "of", MORGAN_BITS)
 for name in ["salicylic acid", "methyl salicylate", "ibuprofen"]:
     similarity = DataStructs.TanimotoSimilarity(fingerprints["aspirin"], fingerprints[name])
     print(f"Tanimoto similarity, aspirin and {name}: {similarity:.2f}")
@@ -271,11 +293,9 @@ for comparing and searching, not for identity.
 
 **Descriptors** are numbers calculated from a molecule: molecular weight, logP (a predicted
 partition coefficient), polar surface area, hydrogen-bond donors. They are what most machine-learning
-models and most filters work with:
+models and most filters work with. RDKit's `Descriptors` module calculates them:
 
 ```python
-from rdkit.Chem import Descriptors
-
 print(f"{'molecule':18}{'MW':>8}{'logP':>7}{'TPSA':>7}{'HBD':>5}")
 for name, mol in library.items():
     print(
@@ -311,8 +331,6 @@ them (Module 13 returns to this).
 A sensible first table for a compound library, which the next modules build on:
 
 ```python
-import pandas as pd
-
 rows = []
 for name, mol in library.items():
     rows.append(

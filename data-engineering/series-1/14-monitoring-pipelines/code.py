@@ -16,19 +16,70 @@ _HERE = _Path(__file__).resolve().parent
 _os.chdir(_HERE)
 _sys.path[:0] = [str(_HERE), str(_HERE.parent)]
 
-# ---- 1. What monitoring is for ----
+# ---- Setup ----
+import json
+import logging
+import re
+from collections import Counter
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import NamedTuple
 
-import chemlib
+import duckdb
+import matplotlib
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 from rdkit import Chem, RDLogger
+from rdkit.Chem import Descriptors
+
+import chemlib
+
+# log lines: level and message only, so the lesson's outputs are the same on every run
+# (a real job would add "%(asctime)s" to the format)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s", force=True)
+log = logging.getLogger(__name__)
+
+# where the lesson writes its files
+WORK = Path("work")
+LOG_FILE = WORK / "pipeline.log"  # the pipeline's structured log
+HISTORY_DB = WORK / "monitoring.duckdb"  # the run history
+PUBLISHED = WORK / "published"  # one Parquet file per successful run
+DASHBOARD = WORK / "run-dashboard.svg"
+
+# each night's supplier file: how many molecules, and the share given a recorded fault
+NIGHTLY_MOLECULES = 1500
+DEFECT_RATE = 0.04
+LIBRARY_SEED = 100  # night n's file is chemlib.library(..., seed=LIBRARY_SEED + n)
+ONE_PAGE_START = 1_666_800  # where the "one page of a sorted export" starts in the library
+TIMING_SEED = 1  # seeds the simulated step durations (Section 3)
+FORTNIGHT_SEED = 14  # seeds the step durations of the fortnight of runs (Section 8)
+
+# the validation rule: elements a record may contain
+ALLOWED_ELEMENTS = {"C", "H", "N", "O", "S", "F", "Cl", "Br"}
+
+# the simulated clock: milliseconds each step takes per row, and the fortnight's timetable
+MS_PER_ROW = {"validate": 0.4, "deduplicate": 0.5, "enrich": 0.05, "describe": 0.3}
+FIRST_NIGHT = datetime(2027, 1, 4, 2, 0)  # 02:00 UTC on the first night
+NIGHTS = 14
+BUG_NIGHT = 8  # the night the inner-join bug is deployed (Section 8)
+ONE_PAGE_NIGHT = 11  # the night the supplier sends one page of a sorted export
+MORNING_CHECK = timedelta(hours=7)  # the freshness check runs at 09:00, 7 hours after the load
+
+# thresholds for the checks and alerts
+FRESHNESS_LIMIT = timedelta(hours=26)  # a nightly job: one day plus some slack
+QUARANTINE_LIMIT = 0.10  # alert above this share of rows quarantined
+PSI_BINS = 10  # bins (reference deciles) for the population stability index
+PSI_LOOK, PSI_ALERT = 0.1, 0.25  # PSI: worth a look above 0.1, an alert above 0.25
+
+# the dashboard's colours (the course's colour-blind-safe palette)
+COLOURS = {"ink": "#1d2130", "violet": "#7c5cf0", "cyan": "#0e9fb5", "muted": "#8b91a1"}
 
 RDLogger.DisableLog("rdApp.*")  # we record RDKit's failures ourselves, as quarantine reasons
-Path("work").mkdir(exist_ok=True)
+matplotlib.use("Agg")  # draw figures to files, without a window
+WORK.mkdir(exist_ok=True)
 
-ALLOWED = {"C", "H", "N", "O", "S", "F", "Cl", "Br"}
-
-
+# ---- 1. What monitoring is for ----
 def check(smiles):
     """Read one record and say why it cannot be used.
 
@@ -47,23 +98,20 @@ def check(smiles):
         return None, "impossible valence"
     if len(Chem.GetMolFrags(mol)) > 1:
         return None, "more than one component"
-    if {atom.GetSymbol() for atom in mol.GetAtoms()} - ALLOWED:
+    if {atom.GetSymbol() for atom in mol.GetAtoms()} - ALLOWED_ELEMENTS:
         return None, "element not allowed"
     return mol, ""
 
 
-tonight = chemlib.add_defects(chemlib.library(1500, seed=101), rate=0.04, seed=1)
-reasons = pd.Series([check(smiles)[1] for smiles in tonight["smiles"]])
+tonight = chemlib.add_defects(
+    chemlib.library(NIGHTLY_MOLECULES, seed=LIBRARY_SEED + 1), rate=DEFECT_RATE, seed=1
+)
+reasons = [check(smiles)[1] for smiles in tonight["smiles"]]
 print(len(tonight), "records tonight")
-print(reasons.replace("", "accepted").value_counts().to_string())
+for reason, count in Counter(reason or "accepted" for reason in reasons).most_common():
+    print(f"{reason:25}{count:>5}")
 
 # ---- 2. Structured logs ----
-import json
-import logging
-import re
-from datetime import datetime, timedelta
-
-
 class Clock:
     """The time, as the pipeline sees it: set and advanced by hand (an injected clock).
 
@@ -110,61 +158,51 @@ class JsonFormatter(logging.Formatter):
         return redact(json.dumps(event))
 
 
-class PrintHandler(logging.Handler):
-    """Print each log line (so it shows in a notebook; a StreamHandler does this in a script)."""
-
-    def emit(self, record):
-        """Print one formatted record."""
-        print(self.format(record))
-
-
 def make_logger(clock, path, screen_level=logging.INFO):
     """A logger that writes JSON lines to a file (everything) and to the screen (from a level).
 
     Args:
         clock: Where the times come from.
         path: The log file.
-        screen_level: The lowest level to print.
+        screen_level: The lowest level to show on screen.
 
     Returns:
         The logger.
     """
-    log = logging.getLogger("supplier_pipeline")
-    for old in list(log.handlers):  # running this twice must not double every line
+    pipeline_log = logging.getLogger("supplier_pipeline")
+    for old in list(pipeline_log.handlers):  # running this twice must not double every line
         old.close()
-        log.removeHandler(old)
-    log.setLevel(logging.INFO)
-    log.propagate = False
-    screen = PrintHandler(level=screen_level)
+        pipeline_log.removeHandler(old)
+    pipeline_log.setLevel(logging.INFO)
+    pipeline_log.propagate = False  # its lines are JSON; keep them out of the plain Setup handler
+    screen = logging.StreamHandler()
+    screen.setLevel(screen_level)
     file = logging.FileHandler(path, mode="w", encoding="utf-8")
     for handler in (screen, file):
         handler.setFormatter(JsonFormatter(clock))
-        log.addHandler(handler)
-    return log
+        pipeline_log.addHandler(handler)
+    return pipeline_log
 
 
-clock = Clock(datetime(2027, 1, 4, 2, 0))  # 02:00 UTC on the first night
-log = make_logger(clock, Path("work/pipeline.log"))
+clock = Clock(FIRST_NIGHT)
+pipeline_log = make_logger(clock, LOG_FILE)
 source = "postgresql://loader:s3cret@chemdb.example.org/suppliers"
-log.info("run started", extra={"fields": {"run_id": "run-0001", "source": source}})
-log.debug("atom-by-atom detail: below the logger's level, so it is dropped")
+pipeline_log.info("run started", extra={"fields": {"run_id": "run-0001", "source": source}})
+pipeline_log.debug("atom-by-atom detail: below the logger's level, so it is dropped")
 clock.advance(4)
-n_bad = int((reasons != "").sum())
+n_bad = sum(reason != "" for reason in reasons)
 fields = {"run_id": "run-0001", "step": "validate", "rows_in": len(tonight), "quarantined": n_bad}
-log.warning("records quarantined", extra={"fields": fields})
-import duckdb
-
+pipeline_log.warning("records quarantined", extra={"fields": fields})
 print(
     duckdb.sql(
-        "SELECT level, count(*) AS events FROM read_json_auto('work/pipeline.log') "
+        f"SELECT level, count(*) AS events FROM read_json_auto('{LOG_FILE.as_posix()}') "
         "GROUP BY level ORDER BY level"
     ).df().to_string(index=False)
 )
 
 # ---- 3. A run history ----
-db_path = Path("work/monitoring.duckdb")
-db_path.unlink(missing_ok=True)  # start each run of the lesson from an empty history
-db = duckdb.connect(str(db_path))
+HISTORY_DB.unlink(missing_ok=True)  # start each run of the lesson from an empty history
+db = duckdb.connect(str(HISTORY_DB))
 db.execute("""
     CREATE TABLE runs (
         run_id VARCHAR PRIMARY KEY, started TIMESTAMP, finished TIMESTAMP, status VARCHAR,
@@ -177,9 +215,6 @@ db.execute("""
         rows_in INTEGER, rows_out INTEGER, quarantined INTEGER, duplicates INTEGER)
 """)
 db.execute("CREATE TABLE quarantine (run_id VARCHAR, id VARCHAR, smiles VARCHAR, reason VARCHAR)")
-import numpy as np
-from rdkit.Chem import Descriptors
-
 NO_ROWS = pd.DataFrame(columns=["id", "smiles", "reason"])
 VENDORS = pd.DataFrame(
     {
@@ -221,9 +256,6 @@ def describe(df):
         logp=[round(Descriptors.MolLogP(mol), 2) for mol in df["mol"]],
     )
     return df, NO_ROWS, 0
-MS_PER_ROW = {"validate": 0.4, "deduplicate": 0.5, "enrich": 0.05, "describe": 0.3}
-
-
 def run_step(run_id, step_no, name, func, df, rng):
     """Run one step, move the clock on, and record what the step did.
 
@@ -248,7 +280,7 @@ def run_step(run_id, step_no, name, func, df, rng):
     )
     if len(quarantined):
         db.execute("INSERT INTO quarantine SELECT ?, id, smiles, reason FROM quarantined", [run_id])
-    log.info("step finished", extra={"fields": {
+    pipeline_log.info("step finished", extra={"fields": {
         "run_id": run_id, "step": name, "rows_in": len(df), "rows_out": len(kept),
         "quarantined": len(quarantined), "duplicates": duplicates}})
     return kept
@@ -260,15 +292,15 @@ def run_pipeline(run_id, batch, steps, rng):
     """Run every step over a batch and record the run (status, counts) in the run history."""
     db.execute("INSERT INTO runs (run_id, started, status) VALUES (?, ?, 'running')",
                [run_id, clock.now()])
-    log.info("run started", extra={"fields": {"run_id": run_id, "rows": len(batch)}})
+    pipeline_log.info("run started", extra={"fields": {"run_id": run_id, "rows": len(batch)}})
     df = batch
     for step_no, (name, func) in enumerate(steps, start=1):
         df = run_step(run_id, step_no, name, func, df, rng)
     return df
 
 
-log = make_logger(clock, Path("work/pipeline.log"), screen_level=logging.WARNING)
-published = run_pipeline("run-0001", tonight, STEPS, np.random.default_rng(1))
+pipeline_log = make_logger(clock, LOG_FILE, screen_level=logging.WARNING)
+published = run_pipeline("run-0001", tonight, STEPS, np.random.default_rng(TIMING_SEED))
 print(db.sql("SELECT step, rows_in, rows_out, quarantined, duplicates FROM steps "
              "WHERE run_id = 'run-0001' ORDER BY step_no").df().to_string(index=False))
 
@@ -301,7 +333,7 @@ def reconcile(run_id):
 
 
 reconcile("run-0001")
-print("run-0001 reconciles")
+log.info("%s reconciles", "run-0001")
 VENDORS_FROM_SPREADSHEET = VENDORS[VENDORS["vendor"] != "Vendor C"]
 
 
@@ -313,7 +345,7 @@ def enrich_inner_join(df):
 buggy_steps = [("validate", validate), ("deduplicate", deduplicate),
                ("enrich", enrich_inner_join), ("describe", describe)]
 clock.advance(600)
-lost_rows = run_pipeline("run-0001-bug", tonight, buggy_steps, np.random.default_rng(1))
+lost_rows = run_pipeline("run-0001-bug", tonight, buggy_steps, np.random.default_rng(TIMING_SEED))
 print("rows published:", len(lost_rows), "instead of", len(published))
 try:
     reconcile("run-0001-bug")
@@ -338,19 +370,16 @@ def run_and_publish(run_id, batch, steps, rng):
         reconcile(run_id)
     except ReconciliationError as err:
         finish_run(run_id, df.iloc[0:0], "failed", str(err))
-        log.error("run failed reconciliation; nothing published",
-                  extra={"fields": {"run_id": run_id}})
+        pipeline_log.error("run failed reconciliation; nothing published",
+                           extra={"fields": {"run_id": run_id}})
         return None
     df = df.drop(columns="mol")  # RDKit objects stay in memory; the SMILES is what we store
-    Path("work/published").mkdir(exist_ok=True)
-    df.to_parquet(f"work/published/{run_id}.parquet", index=False)
+    PUBLISHED.mkdir(exist_ok=True)
+    df.to_parquet(PUBLISHED / f"{run_id}.parquet", index=False)
     finish_run(run_id, df, "succeeded")
     return df
 
 # ---- 5. Metrics: throughput, rates and freshness ----
-FRESHNESS_LIMIT = timedelta(hours=26)
-
-
 def freshness(now):
     """Time since the last successful run finished (None if there has never been one)."""
     last = db.execute("SELECT max(finished) FROM runs WHERE status = 'succeeded'").fetchall()[0][0]
@@ -358,7 +387,7 @@ def freshness(now):
 
 
 clock.advance(600)
-run_and_publish("run-0002", tonight, STEPS, np.random.default_rng(2))
+run_and_publish("run-0002", tonight, STEPS, np.random.default_rng(TIMING_SEED + 1))
 metrics = db.sql("""
     SELECT run_id, status,
            round(rows_in / epoch(finished - started)) AS rows_per_s,
@@ -371,7 +400,7 @@ age = freshness(clock.now())
 print(f"freshness: {age.total_seconds() / 3600:.1f} h; within the limit: {age <= FRESHNESS_LIMIT}")
 
 # ---- 6. Drift in molecular properties ----
-def psi(reference, new, bins=10):
+def psi(reference, new, bins=PSI_BINS):
     """Population stability index of `new` against `reference`, on the reference's quantiles."""
     edges = np.quantile(reference, np.linspace(0, 1, bins + 1))
     edges[0], edges[-1] = -np.inf, np.inf  # catch values beyond the reference's range
@@ -398,17 +427,17 @@ def properties(smiles):
 
 
 reference = published  # run-0001's output, checked by a chemist: the reference
-ordinary = properties(chemlib.library(1500, seed=102)["smiles"])
-one_page = properties(next(chemlib.stream(1500, batch=1500, start=1_666_800))["smiles"])
+ordinary = properties(chemlib.library(NIGHTLY_MOLECULES, seed=LIBRARY_SEED + 2)["smiles"])
+one_page_batch = next(
+    chemlib.stream(NIGHTLY_MOLECULES, batch=NIGHTLY_MOLECULES, start=ONE_PAGE_START)
+)
+one_page = properties(one_page_batch["smiles"])
 print(f"{'batch':10}{'PSI MW':>8}{'PSI logP':>10}{'KS MW':>8}{'KS logP':>9}")
 for name, (mw, logp) in [("ordinary", ordinary), ("one page", one_page)]:
     print(f"{name:10}{psi(reference['mw'], mw):8.3f}{psi(reference['logp'], logp):10.3f}"
           f"{ks(reference['mw'], mw):8.3f}{ks(reference['logp'], logp):9.3f}")
 
 # ---- 7. Alerts that people will read ----
-from typing import NamedTuple
-
-
 class Rule(NamedTuple):
     """Alert when `metric` is above `threshold`."""
 
@@ -418,12 +447,15 @@ class Rule(NamedTuple):
     severity: str  # "page" (now) or "ticket" (working hours)
 
 
+freshness_hours = FRESHNESS_LIMIT.total_seconds() / 3600
 RULES = [
     Rule("run failed", "failed", 0.5, "page"),
-    Rule("data older than 26 hours", "hours_since_success", 26, "page"),
-    Rule("quarantine rate above 10%", "quarantine_rate", 0.10, "ticket"),
-    Rule("molecular weight drift (PSI above 0.25)", "psi_mw", 0.25, "ticket"),
-    Rule("logP drift (PSI above 0.25)", "psi_logp", 0.25, "ticket"),
+    Rule(f"data older than {freshness_hours:.0f} hours", "hours_since_success", freshness_hours,
+         "page"),
+    Rule(f"quarantine rate above {QUARANTINE_LIMIT:.0%}", "quarantine_rate", QUARANTINE_LIMIT,
+         "ticket"),
+    Rule(f"molecular weight drift (PSI above {PSI_ALERT})", "psi_mw", PSI_ALERT, "ticket"),
+    Rule(f"logP drift (PSI above {PSI_ALERT})", "psi_logp", PSI_ALERT, "ticket"),
 ]
 
 
@@ -455,7 +487,7 @@ class Alerter:
         level = logging.ERROR if rule.severity == "page" and state == "FIRING" else logging.WARNING
         fields = {"alert": rule.name, "state": state, "severity": rule.severity,
                   "value": round(float(metrics[rule.metric]), 3), "run_id": metrics.get("run_id")}
-        log.log(level, "alert", extra={"fields": fields})
+        pipeline_log.log(level, "alert", extra={"fields": fields})
 
 # ---- 8. A fortnight of runs ----
 for table in ("runs", "steps", "quarantine"):  # a fresh history for the fortnight
@@ -463,18 +495,17 @@ for table in ("runs", "steps", "quarantine"):  # a fresh history for the fortnig
 db.execute("CREATE TABLE drift (run_id VARCHAR, psi_mw DOUBLE, psi_logp DOUBLE, "
            "ks_mw DOUBLE, ks_logp DOUBLE)")
 alerter = Alerter(RULES)
-first_night = datetime(2027, 1, 4, 2, 0)
-rng = np.random.default_rng(14)
+rng = np.random.default_rng(FORTNIGHT_SEED)
 
-for night in range(1, 15):
+for night in range(1, NIGHTS + 1):
     run_id = f"run-{night:04d}"
-    clock.time = first_night + timedelta(days=night - 1)
-    if night == 11:  # one page of a sorted export
-        batch = next(chemlib.stream(1500, batch=1500, start=1_666_800))
+    clock.time = FIRST_NIGHT + timedelta(days=night - 1)
+    if night == ONE_PAGE_NIGHT:  # one page of a sorted export
+        batch = one_page_batch
     else:
-        batch = chemlib.library(1500, seed=100 + night)
-    batch = chemlib.add_defects(batch, rate=0.04, seed=night)
-    steps = buggy_steps if night == 8 else STEPS
+        batch = chemlib.library(NIGHTLY_MOLECULES, seed=LIBRARY_SEED + night)
+    batch = chemlib.add_defects(batch, rate=DEFECT_RATE, seed=night)
+    steps = buggy_steps if night == BUG_NIGHT else STEPS
     out = run_and_publish(run_id, batch, steps, rng)
     run = db.execute("SELECT status, quarantined / rows_in FROM runs WHERE run_id = ?",
                      [run_id]).fetchall()[0]
@@ -485,7 +516,7 @@ for night in range(1, 15):
         db.execute("INSERT INTO drift VALUES (?, ?, ?, ?, ?)", [run_id, *drift])
         metrics.update(psi_mw=drift[0], psi_logp=drift[1])
     alerter.update(metrics)
-    clock.time = first_night + timedelta(days=night - 1, hours=7)  # 09:00: the freshness check
+    clock.time = FIRST_NIGHT + timedelta(days=night - 1) + MORNING_CHECK  # 09:00: freshness
     age = freshness(clock.now())
     alerter.update({"run_id": run_id, "hours_since_success": age.total_seconds() / 3600})
 history = db.sql("""
@@ -498,14 +529,6 @@ history = db.sql("""
 print(history.to_string(index=False))
 failed = (history["status"] == "failed").sum()
 print(f"error rate over the fortnight: {failed}/{len(history)} runs failed")
-import matplotlib
-
-matplotlib.use("Agg")  # draw to a file, without a window
-import matplotlib.pyplot as plt
-
-COLOURS = {"ink": "#1d2130", "violet": "#7c5cf0", "cyan": "#0e9fb5", "muted": "#8b91a1"}
-
-
 def dashboard(db, path):
     """Draw the run history (counts, quarantine rate, drift) as one SVG figure.
 
@@ -525,13 +548,13 @@ def dashboard(db, path):
     top.set_ylim(0, 2000)
     top.legend(loc="upper center", ncol=2, fontsize=8, frameon=False)
     middle.plot(night, 100 * runs["quarantined"] / runs["rows_in"], "o-", color=COLOURS["cyan"])
-    middle.axhline(10, color=COLOURS["muted"], linestyle="--", linewidth=1)
-    middle.text(0.6, 10.3, "alert threshold", fontsize=8, color=COLOURS["muted"])
+    middle.axhline(100 * QUARANTINE_LIMIT, color=COLOURS["muted"], linestyle="--", linewidth=1)
+    middle.text(0.6, 100 * QUARANTINE_LIMIT + 0.3, "alert threshold", fontsize=8, color=COLOURS["muted"])
     middle.set_ylabel("quarantined (%)")
     middle.set_ylim(0, 12)
     bottom.plot(night, runs["psi_mw"], "o-", color=COLOURS["violet"], label="molecular weight")
     bottom.plot(night, runs["psi_logp"], "s-", color=COLOURS["cyan"], label="logP")
-    for level, text in [(0.1, "0.1: look"), (0.25, "0.25: alert")]:
+    for level, text in [(PSI_LOOK, f"{PSI_LOOK}: look"), (PSI_ALERT, f"{PSI_ALERT}: alert")]:
         bottom.axhline(level, color=COLOURS["muted"], linestyle="--", linewidth=1)
         bottom.text(0.6, level * 1.08, text, fontsize=8, va="bottom", color=COLOURS["muted"])
     bottom.set_yscale("symlog", linthresh=0.1)
@@ -547,5 +570,5 @@ def dashboard(db, path):
     plt.close(fig)
 
 
-dashboard(db, Path("work/run-dashboard.svg"))
+dashboard(db, DASHBOARD)
 db.close()

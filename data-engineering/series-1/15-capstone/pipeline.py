@@ -50,12 +50,19 @@ from rdkit import Chem, RDLogger
 from rdkit.Chem import Descriptors, rdFingerprintGenerator
 from rdkit.Chem.FilterCatalog import FilterCatalog, FilterCatalogParams
 from rdkit.Chem.MolStandardize import rdMolStandardize
-from tenacity import Retrying, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import (
+    RetryCallState,
+    Retrying,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # the series folder, for chemlib
 import chemlib  # noqa: E402
 
 RDLogger.DisableLog("rdApp.*")  # every failure is recorded as a reason code instead
+log = logging.getLogger(__name__)  # the run's structured log; see open_log()
 
 # ---- settings ----------------------------------------------------------------------------------
 
@@ -80,12 +87,14 @@ class Settings(BaseSettings):
 # ---- the rules: what decides the output, versioned and hashed -----------------------------------
 
 ALLOWED_ELEMENTS = ("Br", "C", "Cl", "F", "H", "N", "O", "S")
+MORGAN_RADIUS = 2
+MORGAN_BITS = 2048  # stored packed, eight bits to a byte
 RULES = {
     "version": "1.0.0",  # change it whenever a rule below changes
     "standardise": ["FragmentParent (largest organic fragment)", "Uncharger"],
     "allowed_elements": list(ALLOWED_ELEMENTS),
     "filters": ["RDKit FilterCatalog PAINS (A, B, C)", "max_mw", "max_logp"],
-    "fingerprint": "Morgan radius 2, 2048 bits",
+    "fingerprint": f"Morgan radius {MORGAN_RADIUS}, {MORGAN_BITS} bits",
     "rdkit": rdkit.__version__,
 }
 
@@ -115,7 +124,7 @@ SCHEMAS = {
             ("hbd", pa.int32()),
             ("hba", pa.int32()),
             ("heavy_atoms", pa.int32()),
-            ("morgan2", pa.binary(256)),
+            ("morgan2", pa.binary(MORGAN_BITS // 8)),
             ("rules_hash", pa.string()),
             ("defect", pa.string()),
         ]
@@ -213,7 +222,7 @@ class Faults(NamedTuple):
     crash_in_batch: crash after writing this batch's files, before its checkpoint.
     """
 
-    flaky_reads: dict = {}
+    flaky_reads: dict[int, int] = {}  # never changed, so one shared default is safe
     crash_in_batch: int | None = None
 
 
@@ -221,30 +230,33 @@ class SimulatedCrash(RuntimeError):
     """Raised by an injected fault, as if the process had been killed."""
 
 
-def read_with_retries(
-    settings: Settings, number: int, faults: Faults, log: logging.Logger
-) -> tuple[pd.DataFrame, int]:
+MAX_RETRY_WAIT_S = 30  # the longest wait between two reads, however many have failed
+
+
+def read_with_retries(settings: Settings, number: int, faults: Faults) -> tuple[pd.DataFrame, int]:
     """Read a batch, retrying connection errors with exponential back-off (tenacity).
 
     Args:
         settings: The run's settings (max_attempts, retry_wait_s).
         number: The batch.
         faults: Injected faults; flaky_reads makes the first reads of a batch fail.
-        log: Where retries are logged.
+
+    Each retry is logged as a warning on this module's logger.
 
     Returns:
         The batch and how many attempts it took.
     """
     attempts = 0
 
-    def log_retry(state) -> None:
+    def log_retry(state: RetryCallState) -> None:
+        """Log one failed read, before tenacity waits and tries again."""
         log.warning("read failed; retrying", extra={"fields": {
             "batch": number, "attempt": state.attempt_number,
             "error": str(state.outcome.exception())}})  # fmt: skip
 
     retrying = Retrying(
         stop=stop_after_attempt(settings.max_attempts),
-        wait=wait_exponential(multiplier=settings.retry_wait_s, max=30),
+        wait=wait_exponential(multiplier=settings.retry_wait_s, max=MAX_RETRY_WAIT_S),
         retry=retry_if_exception_type(ConnectionError),
         before_sleep=log_retry,
         reraise=True,
@@ -260,7 +272,7 @@ def read_with_retries(
 
 # ---- validate, standardise, flag and describe: one pure function per batch ---------------------
 
-MORGAN = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
+MORGAN = rdFingerprintGenerator.GetMorganGenerator(radius=MORGAN_RADIUS, fpSize=MORGAN_BITS)
 UNCHARGER = rdMolStandardize.Uncharger()
 
 
@@ -322,7 +334,7 @@ def features(mol: Chem.Mol) -> dict:
         mol: A standardised molecule.
 
     Returns:
-        mw, logp, tpsa, hbd, hba, heavy_atoms, morgan2 (256 bytes) and pains ("" if none).
+        mw, logp, tpsa, hbd, hba, heavy_atoms, morgan2 (packed bits) and pains ("" if none).
     """
     match = pains_catalog().GetFirstMatch(mol)
     return {
@@ -486,7 +498,17 @@ def partition(settings: Settings, table: str, number: int) -> Path:
     return settings.out_dir / table / f"batch={number:05d}" / "part-0.parquet"
 
 
-def commit_batch(con, settings, number, batch, result, attempts, run_id, clock, faults, log):
+def commit_batch(
+    con: duckdb.DuckDBPyConnection,
+    settings: Settings,
+    number: int,
+    batch: pd.DataFrame,
+    result: tuple[pd.DataFrame, pd.DataFrame],
+    attempts: int,
+    run_id: str,
+    clock: Callable[[], datetime],
+    faults: Faults,
+) -> None:
     """Deduplicate and filter one processed batch, write its files, then checkpoint it.
 
     The files are written first and the checkpoint last, in one transaction with the batch's
@@ -503,7 +525,6 @@ def commit_batch(con, settings, number, batch, result, attempts, run_id, clock, 
         run_id: The run committing it.
         clock: Returns the current time.
         faults: Injected faults (crash_in_batch).
-        log: The run's logger.
     """
     rows, quarantined = result
     keys = rows[["inchikey"]]  # noqa: F841 (read by DuckDB below)
@@ -607,6 +628,9 @@ def register_views(con: duckdb.DuckDBPyConnection, settings: Settings) -> None:
                     f"SELECT * FROM read_parquet('{files}', hive_partitioning = true)")  # fmt: skip
 
 
+CHUNK_BYTES = 1 << 20  # files are hashed 1 MiB at a time
+
+
 def sha256_file(path: Path) -> str:
     """The SHA-256 of a file's bytes.
 
@@ -617,13 +641,18 @@ def sha256_file(path: Path) -> str:
         Its hexadecimal digest.
     """
     digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(CHUNK_BYTES), b""):
             digest.update(chunk)
     return digest.hexdigest()
 
 
-def write_manifest(con, settings: Settings, totals: dict, clock: Callable) -> dict:
+def write_manifest(
+    con: duckdb.DuckDBPyConnection,
+    settings: Settings,
+    totals: dict,
+    clock: Callable[[], datetime],
+) -> dict:
     """Write manifest.json: the input, rules, versions, counts and every output's hash.
 
     Args:
@@ -676,7 +705,7 @@ def write_manifest(con, settings: Settings, totals: dict, clock: Callable) -> di
 class JsonFormatter(logging.Formatter):
     """One JSON object per line (as in Module 14), with the time from the run's clock."""
 
-    def __init__(self, clock: Callable):
+    def __init__(self, clock: Callable[[], datetime]):
         super().__init__()
         self.clock = clock
 
@@ -694,26 +723,30 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(event)
 
 
-def make_logger(settings: Settings, clock: Callable) -> logging.Logger:
-    """A logger that appends JSON lines to the run's pipeline.log.
+def close_log() -> None:
+    """Close and remove every handler of this module's logger (the log file, and any other)."""
+    for handler in list(log.handlers):
+        handler.close()
+        log.removeHandler(handler)
+
+
+def open_log(settings: Settings, clock: Callable[[], datetime]) -> None:
+    """Point this module's logger at the run's pipeline.log, one JSON line per event.
+
+    Handlers left from an earlier run, or added by a caller, are removed first, so no line is
+    written twice. The logger does not pass its lines on to the root logger: they are JSON, and a
+    plain handler there would show a second copy of every one.
 
     Args:
         settings: The run's settings (out_dir).
         clock: Where the times come from.
-
-    Returns:
-        The logger.
     """
-    log = logging.getLogger("capstone")
-    for old in list(log.handlers):
-        old.close()
-        log.removeHandler(old)
+    close_log()
     log.setLevel(logging.INFO)
     log.propagate = False
     handler = logging.FileHandler(settings.out_dir / "pipeline.log", encoding="utf-8")
     handler.setFormatter(JsonFormatter(clock))
     log.addHandler(handler)
-    return log
 
 
 # ---- the run -----------------------------------------------------------------------------------
@@ -731,7 +764,9 @@ def utc_now() -> datetime:
 NO_FAULTS = Faults()
 
 
-def run(settings: Settings, clock: Callable = utc_now, faults: Faults = NO_FAULTS) -> dict:
+def run(
+    settings: Settings, clock: Callable[[], datetime] = utc_now, faults: Faults = NO_FAULTS
+) -> dict:
     """Run the pipeline, or resume it: batches already checkpointed are skipped.
 
     Args:
@@ -743,17 +778,20 @@ def run(settings: Settings, clock: Callable = utc_now, faults: Faults = NO_FAULT
         The manifest of the finished output.
     """
     con = connect(settings)
-    log = make_logger(settings, clock)
+    open_log(settings, clock)
     try:
-        return _run(con, settings, clock, faults, log)
+        return _run(con, settings, clock, faults)
     finally:  # a crash still releases the database and the log file
         con.close()
-        for handler in list(log.handlers):
-            handler.close()
-            log.removeHandler(handler)
+        close_log()
 
 
-def _run(con, settings: Settings, clock: Callable, faults: Faults, log: logging.Logger) -> dict:
+def _run(
+    con: duckdb.DuckDBPyConnection,
+    settings: Settings,
+    clock: Callable[[], datetime],
+    faults: Faults,
+) -> dict:
     """The body of run(), with the database and the logger open.
 
     Args:
@@ -761,7 +799,6 @@ def _run(con, settings: Settings, clock: Callable, faults: Faults, log: logging.
         settings: The run's settings.
         clock: Returns the current time.
         faults: Injected faults.
-        log: The run's logger.
 
     Returns:
         The manifest of the finished output.
@@ -778,11 +815,11 @@ def _run(con, settings: Settings, clock: Callable, faults: Faults, log: logging.
     with Parallel(n_jobs=settings.workers) as parallel:
         for first in range(0, len(todo), settings.workers):
             wave = todo[first : first + settings.workers]
-            read = [read_with_retries(settings, number, faults, log) for number in wave]
+            read = [read_with_retries(settings, number, faults) for number in wave]
             results = parallel(delayed(process_batch)(batch) for batch, _ in read)
             for number, (batch, attempts), result in zip(wave, read, results, strict=True):
                 commit_batch(con, settings, number, batch, result, attempts, run_id, clock,
-                             faults, log)  # fmt: skip
+                             faults)  # fmt: skip
     register_views(con, settings)
     totals = reconcile(con, settings)
     con.execute("UPDATE runs SET finished = ?, status = 'succeeded', batches = ? WHERE run_id = ?",
@@ -793,7 +830,10 @@ def _run(con, settings: Settings, clock: Callable, faults: Faults, log: logging.
 
 
 def main() -> None:
-    """Run (or resume) the pipeline with settings from the environment, and print the totals."""
+    """Run (or resume) the pipeline with settings from the environment, and print the totals.
+
+    The run itself reports to pipeline.log; the totals are printed for the person who ran it.
+    """
     settings = Settings()
     manifest = run(settings)
     for stage, count in manifest["counts"].items():

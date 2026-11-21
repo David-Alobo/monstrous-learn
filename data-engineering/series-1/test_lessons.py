@@ -112,3 +112,16 @@ def test_notebook_script_and_readme_are_up_to_date(lesson):
         assert path.exists() and path.read_text(encoding="utf-8") == content, (
             f"{path.name} is out of date: run lessonkit.py {lesson.parent.name} --export"
         )
+
+
+@pytest.mark.parametrize("lesson", LESSONS, **ids)
+def test_imports_only_in_the_setup_block(lesson):
+    """Every import sits in the Setup block, so the lesson's dependencies are in one place."""
+    _, body = lessonkit.front_matter(lesson.read_text(encoding="utf-8"))
+    assert "\n## Setup\n" in body, "a lesson starts with a Setup section"
+    code = [c for kind, c, _, _ in lessonkit.blocks(body) if kind == "python"]
+    for k, block in enumerate(code[1:], start=2):
+        for node in ast.walk(ast.parse(block)):
+            assert not isinstance(node, ast.Import | ast.ImportFrom), (
+                f"python block {k} imports {ast.unparse(node)!r}: move it to the Setup block"
+            )

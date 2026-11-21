@@ -15,24 +15,51 @@ from pathlib import Path as _Path
 _HERE = _Path(__file__).resolve().parent
 _os.chdir(_HERE)
 _sys.path[:0] = [str(_HERE), str(_HERE.parent)]
+
+# ---- Setup ----
+import json
+import logging
 import shutil
 import sys
+import time
+from datetime import datetime, timedelta
 from pathlib import Path
+
+import duckdb
+import numpy as np
+import pandas as pd
+from pydantic import ValidationError
 
 sys.path.insert(0, ".")  # this module's folder, where pipeline.py lives, so Python can find it
 import pipeline  # noqa: E402  (after the path is set)
 
-Path("work").mkdir(exist_ok=True)
-for old in ["work/capstone", "work/capstone-again"]:  # start the lesson from nothing
+# log lines: level and message only, so the lesson's outputs are the same on every run
+# (a real job would add "%(asctime)s" to the format)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s", force=True)
+log = logging.getLogger(__name__)
+
+# where the lesson's runs write: data, run record (DuckDB), log and manifest
+WORK = Path("work")
+OUT_DIR = WORK / "capstone"  # the run that crashes and resumes
+OUT_DIR_AGAIN = WORK / "capstone-again"  # the uninterrupted run of Section 9
+DATABASE = OUT_DIR / "pipeline.duckdb"
+MANIFEST = OUT_DIR / "manifest.json"
+
+RETRY_WAIT_S = 0.01  # seconds before the first retry; short, so the lesson runs quickly
+START = datetime(2027, 1, 18, 2, 0)  # the injected clock starts at 02:00 UTC
+FLAKY_READS = {3: 2}  # injected fault: batch 3's first two reads fail
+CRASH_IN_BATCH = 12  # injected fault: the process "dies" in batch 12, before its checkpoint
+MOVED_BATCH = 7  # the batch whose compounds file is moved away in Section 7
+
+WORK.mkdir(exist_ok=True)
+for old in (OUT_DIR, OUT_DIR_AGAIN):  # start the lesson from nothing
     shutil.rmtree(old, ignore_errors=True)
 print(f"molecules the library generator can make: {pipeline.chemlib.size():,}")
 
 # ---- 2. Settings ----
-settings = pipeline.Settings(out_dir=Path("work/capstone"), retry_wait_s=0.01)
+settings = pipeline.Settings(out_dir=OUT_DIR, retry_wait_s=RETRY_WAIT_S)
 for name, value in settings.model_dump(exclude={"out_dir"}).items():
     print(f"{name:14} {value}")
-from pydantic import ValidationError
-
 try:
     pipeline.Settings(batch_size=0, defect_rate=2, n_molecules=5_000_000)
 except ValidationError as err:
@@ -44,10 +71,6 @@ batch = pipeline.read_batch(settings, 0)
 print(len(batch), "records in batch 0")
 print(batch["defect"].replace("", "(clean)").value_counts().to_string())
 print("the same rows when read again:", batch.equals(pipeline.read_batch(settings, 0)))
-import logging
-from datetime import datetime, timedelta
-
-
 class Tick:
     """A clock for repeatable run records: each reading is one second after the last."""
 
@@ -60,25 +83,15 @@ class Tick:
         return self.time
 
 
-class PrintHandler(logging.Handler):
-    """Print each log line, so it shows in a notebook."""
-
-    def emit(self, record):
-        """Print one formatted record."""
-        print(self.format(record))
-
-
-demo_log = logging.getLogger("capstone-demo")
-demo_log.handlers.clear()
-demo_log.addHandler(PrintHandler())
-demo_log.handlers[0].setFormatter(pipeline.JsonFormatter(Tick(datetime(2027, 1, 18, 2, 0))))
-flaky = pipeline.Faults(flaky_reads={3: 2})
-batch, attempts = pipeline.read_with_retries(settings, 3, flaky, demo_log)
+screen = logging.StreamHandler()
+screen.setFormatter(pipeline.JsonFormatter(Tick(START)))
+pipeline.log.addHandler(screen)  # run() replaces it with the run's log file
+pipeline.log.propagate = False
+flaky = pipeline.Faults(flaky_reads=FLAKY_READS)
+batch, attempts = pipeline.read_with_retries(settings, 3, flaky)
 print("batch 3 read after", attempts, "attempts:", len(batch), "records")
 
 # ---- 4. Validate and standardise ----
-import pandas as pd
-
 examples = pd.DataFrame(
     {
         "id": [f"EX-{k}" for k in range(1, 9)],
@@ -109,38 +122,32 @@ print(duplicates[["id", "reason", "detail"]].to_string(index=False))
 kept, filtered = pipeline.apply_filters(unique, settings)
 print(filtered[["id", "reason", "detail"]].to_string(index=False))
 print("kept:", kept["id"].tolist())
-import numpy as np
-
 fingerprint = kept["morgan2"].iloc[0]
 bits = np.unpackbits(np.frombuffer(fingerprint, dtype=np.uint8))
 print(f"{len(fingerprint)} bytes, {len(bits)} bits, {bits.sum()} set")
 print(kept[["id", "mw", "logp", "tpsa", "hbd", "hba", "heavy_atoms"]].to_string(index=False))
 
 # ---- 6. A crash halfway, and a resume ----
-import time
-
-import duckdb
-
-clock = Tick(datetime(2027, 1, 18, 2, 0))
-faults = pipeline.Faults(flaky_reads={3: 2}, crash_in_batch=12)
+clock = Tick(START)
+faults = pipeline.Faults(flaky_reads=FLAKY_READS, crash_in_batch=CRASH_IN_BATCH)
 started = time.perf_counter()
 try:
     pipeline.run(settings, clock, faults)
 except pipeline.SimulatedCrash as crash:
-    print("crashed:", crash)
+    log.error("crashed: %s", crash)
 seconds = {"crashed run": time.perf_counter() - started}
 
-with duckdb.connect("work/capstone/pipeline.duckdb", read_only=True) as db:
+with duckdb.connect(str(DATABASE), read_only=True) as db:
     print(db.sql("SELECT run_id, status FROM runs").df().to_string(index=False))
     done = db.sql("SELECT count(*), max(batch) FROM batches").fetchall()[0]
 print(f"checkpointed: {done[0]} batches (0 to {done[1]}) of {pipeline.n_batches(settings)}")
-print("batch 12's files are on disk:",
-      pipeline.partition(settings, "compounds", 12).exists())
+print(f"batch {CRASH_IN_BATCH}'s files are on disk:",
+      pipeline.partition(settings, "compounds", CRASH_IN_BATCH).exists())
 started = time.perf_counter()
 manifest = pipeline.run(settings, clock)
 seconds["resumed run"] = time.perf_counter() - started
 
-with duckdb.connect("work/capstone/pipeline.duckdb", read_only=True) as db:
+with duckdb.connect(str(DATABASE), read_only=True) as db:
     print(db.sql("SELECT run_id, status, batches FROM runs ORDER BY run_id").df()
           .to_string(index=False))
     print(db.sql("SELECT run_id, count(*) AS batches, min(batch) AS first, max(batch) AS last, "
@@ -153,15 +160,15 @@ for stage, count in counts.items():
     print(f"{stage:24} {count:>7,}")
 accounted = sum(count for stage, count in counts.items() if stage not in ("batches", "rows_in"))
 print("in = quarantined + duplicates + filtered + out:", counts["rows_in"] == accounted)
-moved = pipeline.partition(settings, "compounds", 7)
+moved = pipeline.partition(settings, "compounds", MOVED_BATCH)
 moved.rename(moved.with_suffix(".bak"))
-with duckdb.connect("work/capstone/pipeline.duckdb") as db:
+with duckdb.connect(str(DATABASE)) as db:
     try:
         pipeline.reconcile(db, settings)
     except pipeline.ReconciliationError as err:
         print("ReconciliationError:", err)
 moved.with_suffix(".bak").rename(moved)
-with duckdb.connect("work/capstone/pipeline.duckdb", read_only=True) as db:
+with duckdb.connect(str(DATABASE), read_only=True) as db:
     truth = db.sql("""
         SELECT defect, 'quarantine: ' || reason AS outcome, count(*) AS records
         FROM quarantine GROUP BY ALL
@@ -175,9 +182,7 @@ with duckdb.connect("work/capstone/pipeline.duckdb", read_only=True) as db:
 print(truth.to_string(index=False))
 
 # ---- 8. The provenance manifest ----
-import json
-
-manifest = json.loads(Path("work/capstone/manifest.json").read_text(encoding="utf-8"))
+manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
 print("runs:", manifest["runs"])
 print("input:", manifest["input"]["source"], manifest["input"]["n_molecules"], "molecules, seed",
       manifest["input"]["seed"], "defect rate", manifest["input"]["defect_rate"])
@@ -187,9 +192,9 @@ print("output files:", len(manifest["outputs"]))
 print("data sha256:", manifest["data_sha256"][:16], "...")
 
 # ---- 9. The same answer without the crash ----
-again_settings = settings.model_copy(update={"out_dir": Path("work/capstone-again")})
+again_settings = settings.model_copy(update={"out_dir": OUT_DIR_AGAIN})
 started = time.perf_counter()
-again = pipeline.run(again_settings, Tick(datetime(2027, 1, 18, 2, 0)))
+again = pipeline.run(again_settings, Tick(START))
 seconds["uninterrupted run"] = time.perf_counter() - started
 print("same counts:", again["counts"] == manifest["counts"])
 print("same files, byte for byte:", again["outputs"] == manifest["outputs"])
@@ -201,7 +206,7 @@ print(f"about {rate:,.0f} records per second with {settings.workers} workers")
 print(f"the whole library at that rate: about {pipeline.chemlib.size() / rate / 3600:.1f} hours")
 
 # ---- 10. Querying the result ----
-with duckdb.connect("work/capstone/pipeline.duckdb", read_only=True) as db:
+with duckdb.connect(str(DATABASE), read_only=True) as db:
     print(db.sql("""
         SELECT reason, count(*) AS records FROM removed
         WHERE reason <> 'PAINS' GROUP BY reason

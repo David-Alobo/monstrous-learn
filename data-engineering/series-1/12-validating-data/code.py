@@ -16,10 +16,55 @@ _HERE = _Path(__file__).resolve().parent
 _os.chdir(_HERE)
 _sys.path[:0] = [str(_HERE), str(_HERE.parent)]
 
-# ---- 1. A data contract ----
+# ---- Setup ----
 import json
+import logging
+import math
+import time
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
+from typing import Self
 
+import duckdb
+import numpy as np
+import pandas as pd
+import pandera.pandas as pa
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from rdkit import Chem, RDLogger
+
+import chemlib
+
+# log lines: level and message only, so the lesson's outputs are the same on every run
+# (a real job would add "%(asctime)s" to the format)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s", force=True)
+log = logging.getLogger(__name__)
+
+# where the lesson writes its files (git-ignored); change it to write somewhere else
+WORK = Path("work")
+# the database the checked measurements and the quarantine are loaded into
+DB_PATH = WORK / "activity.duckdb"
+# the test data: how many compounds and measurements, and the seeds that make them
+N_COMPOUNDS = 2_000
+COMPOUND_SEED = 12
+N_MEASUREMENTS = 5_000
+MEASUREMENT_SEED = 13
+FAULT_SEED = 14
+# the name of the batch we check (a real job takes it from the file or the run)
+BATCH_ID = "batch-0001"
+# the targets we screen: the only target_id values the contract allows
+TARGETS = ["ABL1", "BRAF", "CDK2", "EGFR", "JAK2"]
+# how far a stored pChEMBL may be from 9 - log10(value in nM) and still be accepted
+PCHEMBL_TOLERANCE = 0.01
+# the largest share of failing rows a batch may have and still be loaded (0.05 is 5%)
+MAX_FAILED_SHARE = 0.05
+# the timing comparison repeats the batch this many times (40 gives about 200,000 rows)
+BENCHMARK_COPIES = 40
+
+WORK.mkdir(exist_ok=True)
+RDLogger.DisableLog("rdApp.*")  # RDKit's own warnings would repeat what our errors say
+
+# ---- 1. A data contract ----
 CONTRACT = {
     "name": "measurements",
     "version": "1.0.0",
@@ -32,24 +77,19 @@ CONTRACT = {
         "activity_type": "text, required, one of IC50, Ki, Kd, EC50",
         "value": "number, required, greater than 0",
         "units": "text, required, one of nM, µM, mM",
-        "pchembl": "number, optional, 0 to 14, equal to 9 - log10(value in nM) within 0.01",
+        "pchembl": "number, optional, 0 to 14, equal to 9 - log10(value in nM) "
+                   f"within {PCHEMBL_TOLERANCE}",
     },
     "rows": "no two rows with the same compound, target, activity type, value and units",
 }
 
-Path("work").mkdir(exist_ok=True)
-contract_file = Path("work") / f"contract-{CONTRACT['name']}-{CONTRACT['version']}.json"
+contract_file = WORK / f"contract-{CONTRACT['name']}-{CONTRACT['version']}.json"
 contract_file.write_text(json.dumps(CONTRACT, indent=2, ensure_ascii=False), encoding="utf-8")
-print(contract_file.name, "with", len(CONTRACT["columns"]), "columns")
+log.info("wrote %s with %d columns", contract_file.name, len(CONTRACT["columns"]))
 
 # ---- A model for one measurement ----
-import math
-from enum import Enum
-
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
-from rdkit import Chem, RDLogger
-
-RDLogger.DisableLog("rdApp.*")  # RDKit's own warnings would repeat what the errors say
+MEASUREMENT_ID = r"^M-\d{6}$"  # the identifier formats the contract gives
+COMPOUND_ID = r"^ML-\d{8}$"
 
 
 class ActivityType(str, Enum):
@@ -89,11 +129,11 @@ class Activity(BaseModel):
         return self.value * NM_PER_UNIT[self.units]
 
     @model_validator(mode="after")
-    def pchembl_matches_value(self):
+    def pchembl_matches_value(self) -> Self:
         """pChEMBL is -log10 of the molar value, so it must agree with value and units."""
         if self.pchembl is not None:
             expected = 9 - math.log10(self.value_nm)
-            if abs(self.pchembl - expected) > 0.01:
+            if abs(self.pchembl - expected) > PCHEMBL_TOLERANCE:
                 raise ValueError(
                     f"pchembl {self.pchembl} does not match {self.value} {self.units.value} "
                     f"(expected {expected:.2f})"
@@ -104,8 +144,8 @@ class Activity(BaseModel):
 class Measurement(Activity):
     """An activity together with the compound it was measured for."""
 
-    measurement_id: str = Field(pattern=r"^M-\d{6}$")
-    compound_id: str = Field(pattern=r"^ML-\d{8}$")
+    measurement_id: str = Field(pattern=MEASUREMENT_ID)
+    compound_id: str = Field(pattern=COMPOUND_ID)
     smiles: str
 
     @field_validator("smiles")
@@ -187,22 +227,14 @@ def test_conversion() -> None:
 
 
 test_conversion()
-print("conversion tests passed")
+log.info("conversion tests passed")
 
 # ---- 3. Test data with known faults ----
-import numpy as np
-import pandas as pd
-
-import chemlib
-
-compounds = chemlib.library(2_000, seed=12)[["id", "smiles"]]
+compounds = chemlib.library(N_COMPOUNDS, seed=COMPOUND_SEED)[["id", "smiles"]]
 compounds = compounds.rename(columns={"id": "compound_id"})
 compounds["inchikey"] = [Chem.MolToInchiKey(Chem.MolFromSmiles(s)) for s in compounds["smiles"]]
-print(len(compounds), "compounds")
+log.info("made %d compounds", len(compounds))
 print(compounds.head(3).to_string(index=False))
-TARGETS = ["ABL1", "BRAF", "CDK2", "EGFR", "JAK2"]
-
-
 def make_measurements(compounds: pd.DataFrame, n: int, seed: int) -> pd.DataFrame:
     """n synthetic measurements for random compounds, with consistent values, units and pChEMBL."""
     rng = np.random.default_rng(seed)
@@ -222,7 +254,8 @@ def make_measurements(compounds: pd.DataFrame, n: int, seed: int) -> pd.DataFram
             "smiles": rows["smiles"],
             "inchikey": rows["inchikey"],
             "target_id": rng.choice(TARGETS, n),
-            "activity_type": rng.choice(["IC50", "Ki", "Kd", "EC50"], n, p=[0.6, 0.2, 0.1, 0.1]),
+            "activity_type": rng.choice([t.value for t in ActivityType], n,
+                                        p=[0.6, 0.2, 0.1, 0.1]),
             "value": value,
             "units": units,
             "pchembl": pchembl,
@@ -230,7 +263,7 @@ def make_measurements(compounds: pd.DataFrame, n: int, seed: int) -> pd.DataFram
     )
 
 
-clean = make_measurements(compounds, 5_000, seed=13)
+clean = make_measurements(compounds, N_MEASUREMENTS, seed=MEASUREMENT_SEED)
 print(clean[["measurement_id", "compound_id", "target_id", "activity_type", "value", "units",
              "pchembl"]].head(4).to_string(index=False))
 print(clean["units"].value_counts().to_dict())
@@ -255,7 +288,7 @@ def inject_faults(df: pd.DataFrame, seed: int) -> tuple[pd.DataFrame, pd.Series]
     with_pchembl = out.index[out["pchembl"].notna() & (out["units"] == "µM")]
     used: set[int] = set()
 
-    def pick(kind: str, pool) -> list[int]:
+    def pick(kind: str, pool: pd.Index) -> list[int]:
         """FAULTS[kind] rows from pool that have no fault yet."""
         free = [i for i in pool if i not in used]
         chosen = [int(i) for i in rng.choice(free, FAULTS[kind], replace=False)]
@@ -286,13 +319,11 @@ def inject_faults(df: pd.DataFrame, seed: int) -> tuple[pd.DataFrame, pd.Series]
     return out, fault
 
 
-batch, truth = inject_faults(clean, seed=14)
+batch, truth = inject_faults(clean, seed=FAULT_SEED)
 print(len(batch), "rows,", int((truth != "").sum()), "with a fault")
 print(truth[truth != ""].value_counts().sort_index().to_string())
 
 # ---- A schema for the whole table ----
-import pandera.pandas as pa
-
 INCHIKEY = r"^[A-Z]{14}-[A-Z]{10}-[A-Z]$"
 
 
@@ -302,7 +333,7 @@ def pchembl_matches_value(df: pd.DataFrame) -> pd.Series:
     checkable = df["pchembl"].notna() & factor.notna() & (df["value"] > 0)
     value_nm = (df["value"] * factor).where(checkable, 1.0)
     expected = 9 - np.log10(value_nm.astype(float))
-    return ~checkable | ((df["pchembl"] - expected).abs() <= 0.01)
+    return ~checkable | ((df["pchembl"] - expected).abs() <= PCHEMBL_TOLERANCE)
 
 
 def inchikey_matches_smiles(df: pd.DataFrame) -> pd.Series:
@@ -316,8 +347,8 @@ def measurement_schema(known_compounds: pd.Series) -> pa.DataFrameSchema:
     """The measurements contract, version 1.0.0, as a Pandera schema."""
     return pa.DataFrameSchema(
         {
-            "measurement_id": pa.Column(str, pa.Check.str_matches(r"^M-\d{6}$"), unique=True),
-            "compound_id": pa.Column(str, [pa.Check.str_matches(r"^ML-\d{8}$"),
+            "measurement_id": pa.Column(str, pa.Check.str_matches(MEASUREMENT_ID), unique=True),
+            "compound_id": pa.Column(str, [pa.Check.str_matches(COMPOUND_ID),
                                            pa.Check.isin(known_compounds.tolist())]),
             "smiles": pa.Column(str),
             "inchikey": pa.Column(str, pa.Check.str_matches(INCHIKEY)),
@@ -340,7 +371,7 @@ def measurement_schema(known_compounds: pd.Series) -> pa.DataFrameSchema:
 
 schema = measurement_schema(compounds["compound_id"])
 print("schema columns match the contract:", list(schema.columns) == list(CONTRACT["columns"]))
-print("the clean table passes:", len(schema.validate(clean)), "rows")
+log.info("the clean table passes: %d rows", len(schema.validate(clean)))
 
 # ---- Lazy validation: every failure at once ----
 try:
@@ -372,15 +403,12 @@ reasons.index = reasons.index.astype(int)
 quarantine = batch.loc[reasons.index].assign(reason=reasons)
 kept = batch.drop(index=reasons.index)
 schema.validate(kept, lazy=True)  # raises if anything that fails is still there
-print("kept:", len(kept), " quarantined:", len(quarantine))
+log.info("kept %d rows, quarantined %d", len(kept), len(quarantine))
 print(quarantine[["measurement_id", "units", "value", "reason"]].head(4).to_string(index=False))
-import duckdb
-
-db_path = Path("work") / "activity.duckdb"
-db_path.unlink(missing_ok=True)
-with duckdb.connect(str(db_path)) as db:
+DB_PATH.unlink(missing_ok=True)
+with duckdb.connect(str(DB_PATH)) as db:
     db.execute("CREATE TABLE measurements AS SELECT * FROM kept")
-    db.execute("CREATE TABLE quarantine AS SELECT 'batch-0001' AS batch_id, * FROM quarantine")
+    db.execute("CREATE TABLE quarantine AS SELECT ? AS batch_id, * FROM quarantine", [BATCH_ID])
     for row in db.sql(
         "SELECT batch_id, reason, count(*) AS n_rows FROM quarantine "
         "GROUP BY ALL ORDER BY n_rows DESC, reason"
@@ -388,31 +416,44 @@ with duckdb.connect(str(db_path)) as db:
         print(row)
 
 # ---- Stop the batch, or let it through? ----
-def decide(n_rows: int, n_failed: int, max_failed_share: float = 0.05) -> str:
-    """'load' if the share of failing rows is within the threshold, otherwise 'stop'."""
-    return "load" if n_failed / n_rows <= max_failed_share else "stop"
+@dataclass(frozen=True, slots=True)
+class BatchDecision:
+    """What was decided about one batch, and the numbers it was decided on."""
+
+    batch_id: str
+    n_rows: int
+    n_failed: int
+    action: str  # "load" or "stop"
 
 
-supplier_manifest = {"file": "batch-0001.csv", "rows": 5_020}
+def decide(batch_id: str, n_rows: int, n_failed: int,
+           max_failed_share: float = MAX_FAILED_SHARE) -> BatchDecision:
+    """Load the batch if its share of failing rows is within the threshold, otherwise stop it."""
+    action = "load" if n_failed / n_rows <= max_failed_share else "stop"
+    return BatchDecision(batch_id, n_rows, n_failed, action)
+
+
+supplier_manifest = {"file": f"{BATCH_ID}.csv", "rows": 5_020}
 print("rows agree with the manifest:",
       len(kept) + len(quarantine) == len(batch) == supplier_manifest["rows"])
-print(f"failed share {len(quarantine) / len(batch):.2%}:", decide(len(batch), len(quarantine)))
+decision = decide(BATCH_ID, len(batch), len(quarantine))
+log.info("%s: %d of %d rows failed (%.2f%%), %s", decision.batch_id, decision.n_failed,
+         decision.n_rows, 100 * decision.n_failed / decision.n_rows, decision.action)
+print(decision)
 
 try:
     schema.validate(batch.drop(columns="units"), lazy=True)
 except pa.errors.SchemaErrors as error:
     missing = error.failure_cases.query("check == 'column_in_dataframe'")
-    print("a missing column stops the batch:", missing["failure_case"].tolist())
+    log.error("batch stopped, column missing: %s", missing["failure_case"].tolist())
 
 # ---- 5. Records or tables? Measuring the difference ----
-import time
-
 ACTIVITY_COLUMNS = ["target_id", "activity_type", "value", "units", "pchembl"]
 activity_schema = pa.DataFrameSchema(
     {name: schema.columns[name] for name in ACTIVITY_COLUMNS},
     checks=[pa.Check(pchembl_matches_value, name="pchembl_matches_value")],
 )
-big = pd.concat([batch[ACTIVITY_COLUMNS]] * 40, ignore_index=True)
+big = pd.concat([batch[ACTIVITY_COLUMNS]] * BENCHMARK_COPIES, ignore_index=True)
 
 
 def as_records(df: pd.DataFrame) -> list[dict]:
@@ -422,7 +463,7 @@ def as_records(df: pd.DataFrame) -> list[dict]:
 
 def failing_records(records: list[dict]) -> set[int]:
     """Validate every record as an Activity; the positions of the records that fail."""
-    failed = set()
+    failed: set[int] = set()
     for i, record in enumerate(records):
         try:
             Activity.model_validate(record)

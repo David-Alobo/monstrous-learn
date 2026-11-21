@@ -8,17 +8,29 @@ started it cannot always be found. A module file works with every backend, and c
 
 from __future__ import annotations
 
+import logging
 import time
+from collections import namedtuple
 
 import pandas as pd
 from rdkit import Chem, RDLogger
 from rdkit.Chem import Descriptors, rdFingerprintGenerator
 
-RDLogger.DisableLog("rdApp.*")  # keep the workers quiet; failures are recorded in the results
-MORGAN = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
+log = logging.getLogger(__name__)
+# RDKit's own message for every unreadable SMILES is turned off; describe() logs one line per chunk
+RDLogger.DisableLog("rdApp.*")
+
+FP_RADIUS, FP_BITS = 2, 2048  # Morgan fingerprint settings
+LOOK_UP_SECONDS = 0.05  # how long the stand-in web request waits
+MORGAN = rdFingerprintGenerator.GetMorganGenerator(radius=FP_RADIUS, fpSize=FP_BITS)
+
+# one row of results: a tuple whose positions also have names, so it prints readably, compares
+# equal to a plain tuple, and pickles to and from worker processes like one
+Description = namedtuple("Description", ["canonical_smiles", "mw", "tpsa", "bits_on"])
+UNREADABLE = Description("", 0.0, 0.0, 0)
 
 
-def describe(smiles: list[str]) -> list[tuple[str, float, float, int]]:
+def describe(smiles: list[str]) -> list[Description]:
     """Standardise and describe a chunk of molecules, given as SMILES.
 
     Args:
@@ -26,26 +38,30 @@ def describe(smiles: list[str]) -> list[tuple[str, float, float, int]]:
 
     Returns:
         For each molecule, in the same order: canonical SMILES, molecular weight, polar surface
-        area and the number of bits set in its 2048-bit Morgan fingerprint ("", 0.0, 0.0, 0 for
-        SMILES RDKit cannot read).
+        area and the number of bits set in its 2048-bit Morgan fingerprint (UNREADABLE for SMILES
+        RDKit cannot read, with one warning per chunk saying how many).
     """
     rows = []
     for text in smiles:
         mol = Chem.MolFromSmiles(text)
         if mol is None:
-            rows.append(("", 0.0, 0.0, 0))
+            rows.append(UNREADABLE)
             continue
         rows.append(
-            (
+            Description(
                 Chem.MolToSmiles(mol),
                 round(Descriptors.MolWt(mol), 2),
                 round(Descriptors.TPSA(mol), 2),
                 MORGAN.GetFingerprint(mol).GetNumOnBits(),
             )
         )
+    unreadable = rows.count(UNREADABLE)
+    if unreadable:
+        log.warning("%d of %d SMILES could not be read", unreadable, len(smiles))
     return rows
 
 
+# the pandas type of each field of Description, for tables of results
 COLUMNS = {"canonical_smiles": "string", "mw": "float64", "tpsa": "float64", "bits_on": "int64"}
 
 
@@ -58,7 +74,7 @@ def describe_frame(frame: pd.DataFrame) -> pd.DataFrame:
     Returns:
         Its id and vendor, with the columns in COLUMNS added.
     """
-    described = pd.DataFrame(describe(list(frame["smiles"])), columns=list(COLUMNS))
+    described = pd.DataFrame(describe(list(frame["smiles"])), columns=list(Description._fields))
     described = described.astype(COLUMNS)
     described.index = frame.index
     return pd.concat([frame[["id", "vendor"]], described], axis=1)
@@ -71,7 +87,7 @@ def look_up(identifier: str) -> str:
         identifier: A molecule's id.
 
     Returns:
-        A made-up record for it, after waiting 50 milliseconds.
+        A made-up record for it, after waiting LOOK_UP_SECONDS.
     """
-    time.sleep(0.05)
+    time.sleep(LOOK_UP_SECONDS)
     return f"record for {identifier}"

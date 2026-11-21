@@ -16,17 +16,50 @@ _HERE = _Path(__file__).resolve().parent
 _os.chdir(_HERE)
 _sys.path[:0] = [str(_HERE), str(_HERE.parent)]
 
-# ---- 1. What goes wrong without a gate ----
+# ---- Setup ----
+import logging
+import re
+from collections import Counter
+from collections.abc import Callable
+from pathlib import Path
+from typing import NamedTuple
+
+import pandas as pd
+from rdkit import Chem, RDLogger, rdBase
+from rdkit.Chem import Descriptors
+
 import chemlib
 
-library = chemlib.library(10_000, seed=6)
-dirty = chemlib.add_defects(library, rate=0.05, seed=7)
+# log lines: level and message only, so the lesson's outputs are the same on every run
+# (a real job would add "%(asctime)s" to the format)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s", force=True)
+log = logging.getLogger(__name__)
+
+# the teaching library and the damage done to it: change the size or seeds for another sample
+LIBRARY_SIZE = 10_000  # molecules made by chemlib
+LIBRARY_SEED = 6
+DEFECT_RATE = 0.05  # fraction of molecules given a fault by add_defects
+DEFECT_SEED = 7
+WORK = Path("work")  # where the accepted records and the quarantine are written
+
+# the library's policy (section 3): edit these lists and limits to suit another collection
+ALLOWED_ELEMENTS = {"H", "B", "C", "N", "O", "F", "P", "S", "Cl", "Br", "I"}
+SALTS = {"Cl": "hydrogen chloride", "[Cl-]": "chloride", "Br": "hydrogen bromide",
+         "[Na+]": "sodium", "[K+]": "potassium", "O=C(O)C(F)(F)F": "trifluoroacetic acid"}
+SOLVENTS = {"O": "water", "CCO": "ethanol", "CO": "methanol", "CS(C)=O": "DMSO",
+            "ClCCl": "dichloromethane"}  # fmt: skip
+HEAVY_ATOMS = (6, 50)  # smallest and largest number of heavy atoms in the largest piece
+MAX_WEIGHT = 700.0  # largest molecular weight of the largest piece, in g/mol
+
+WORK.mkdir(exist_ok=True)
+
+# ---- 1. What goes wrong without a gate ----
+library = chemlib.library(LIBRARY_SIZE, seed=LIBRARY_SEED)
+dirty = chemlib.add_defects(library, rate=DEFECT_RATE, seed=DEFECT_SEED)
 print(len(dirty), "records")
 print(dirty["defect"].replace("", "(none)").value_counts().sort_index().to_string())
 for kind, row in dirty[dirty["defect"] != ""].groupby("defect").head(1).iterrows():
     print(f"{row['defect']:10} {row['smiles']}")
-from rdkit import Chem, RDLogger
-
 RDLogger.DisableLog("rdApp.*")  # silence RDKit, as many scripts do
 mols = [Chem.MolFromSmiles(s) for s in dirty["smiles"]]
 RDLogger.EnableLog("rdApp.*")
@@ -38,9 +71,6 @@ print(in_pieces, "kept records are in more than one piece")
 print(with_selenium, "kept records contain selenium")
 
 # ---- Reasons, not True or False ----
-from typing import NamedTuple
-
-
 class Issue(NamedTuple):
     """One problem found in a record: what it is, in words, and what to do about it."""
 
@@ -49,20 +79,16 @@ class Issue(NamedTuple):
     action: str  # "reject" (cannot be repaired), "fix" (Module 7 repairs it) or "warn"
 
 # ---- Capturing RDKit's messages ----
-import logging
-import re
-
-from rdkit import rdBase
-
-
 class Collector(logging.Handler):
     """Keeps RDKit's log messages, without their timestamps, until they are read."""
 
-    def __init__(self):
+    def __init__(self) -> None:
+        """Start with no messages."""
         super().__init__()
-        self.messages = []
+        self.messages: list[str] = []
 
-    def emit(self, record):
+    def emit(self, record: logging.LogRecord) -> None:
+        """Keep one message, with RDKit's "[hh:mm:ss] " prefix removed."""
         text = re.sub(r"^\[\d\d:\d\d:\d\d\] ", "", record.getMessage()).strip()
         self.messages.append(text)
 
@@ -71,7 +97,7 @@ rdBase.LogToPythonLogger()
 collector = Collector()
 rdkit_log = logging.getLogger("rdkit")
 rdkit_log.handlers = [collector]  # replace RDKit's own handler, which prints to the screen
-rdkit_log.propagate = False
+rdkit_log.propagate = False  # keep RDKit's messages away from our screen handler
 PROBLEM_CODES = {
     "AtomValenceException": "VALENCE",
     "AtomKekulizeException": "AROMATICITY",
@@ -79,7 +105,7 @@ PROBLEM_CODES = {
 }
 
 
-def parse(smiles):
+def parse(smiles: str) -> tuple[Chem.Mol | None, list[Issue]]:
     """Read a SMILES and sanitise it, keeping RDKit's reasons when either step fails.
 
     Returns the sanitised molecule (or None) and a list of issues.
@@ -112,11 +138,47 @@ for name, smiles in examples.items():
     for issue in issues:
         print(f"    {issue.code}: {issue.message}")
 
+# ---- Turning RDKit's messages down, or off ----
+def heard(action: Callable[[], object]) -> list[str]:
+    """Run some RDKit code and return the messages that reached the collector."""
+    collector.messages.clear()
+    action()
+    return collector.messages.copy()
+
+
+def two_problems() -> None:
+    """Read one SMILES that fails (an error) and one with a lone hydrogen (a warning)."""
+    Chem.MolFromSmiles("c1ccccc")
+    Chem.MolFromSmiles("C.[H]")
+
+
+print("everything on:", *heard(two_problems), sep="\n    ")
+# 1. one channel off, here the warnings, then on again
+RDLogger.DisableLog("rdApp.warning")
+print("warnings off:", *heard(two_problems), sep="\n    ")
+RDLogger.EnableLog("rdApp.warning")
+
+# 2. everything off, but only inside the with block: the rest of the program is untouched
+with rdBase.BlockLogs():
+    print("inside BlockLogs:", heard(two_problems))
+print("after BlockLogs:", len(heard(two_problems)), "messages")
+# 3. a level on RDKit's logger: here only errors and worse pass
+rdkit_log.setLevel(logging.ERROR)
+print("logger at ERROR:", *heard(two_problems), sep="\n    ")
+rdkit_log.setLevel(logging.WARNING)  # back to RDKit's default: warnings and errors
+
+# 4. a level on one handler: the collector keeps everything, a file handler only errors
+to_file = logging.FileHandler(WORK / "rdkit.log", mode="w", encoding="utf-8")
+to_file.setLevel(logging.ERROR)
+rdkit_log.addHandler(to_file)
+print("collector:", len(heard(two_problems)), "messages")
+rdkit_log.removeHandler(to_file)
+to_file.close()
+logged = (WORK / "rdkit.log").read_text(encoding="utf-8").strip()
+print("rdkit.log:", re.sub(r"^\[\d\d:\d\d:\d\d\] ", "", logged))  # without the time
+
 # ---- Elements ----
-ALLOWED_ELEMENTS = {"H", "B", "C", "N", "O", "F", "P", "S", "Cl", "Br", "I"}
-
-
-def check_elements(mol):
+def check_elements(mol: Chem.Mol) -> list[Issue]:
     """Elements outside the allow-list."""
     found = sorted({atom.GetSymbol() for atom in mol.GetAtoms()} - ALLOWED_ELEMENTS)
     if not found:
@@ -128,13 +190,7 @@ print(check_elements(Chem.MolFromSmiles("CC(=O)Oc1ccccc1C(=O)O")))
 print(check_elements(Chem.MolFromSmiles("C[Se]c1ccccc1")))
 
 # ---- Fragments: salts, solvents and mixtures ----
-SALTS = {"Cl": "hydrogen chloride", "[Cl-]": "chloride", "Br": "hydrogen bromide",
-         "[Na+]": "sodium", "[K+]": "potassium", "O=C(O)C(F)(F)F": "trifluoroacetic acid"}
-SOLVENTS = {"O": "water", "CCO": "ethanol", "CO": "methanol", "CS(C)=O": "DMSO",
-            "ClCCl": "dichloromethane"}  # fmt: skip
-
-
-def check_fragments(mol):
+def check_fragments(mol: Chem.Mol) -> list[Issue]:
     """More than one molecule in the record: salts and solvents (fixable) or a mixture."""
     pieces = sorted(Chem.MolToSmiles(f) for f in Chem.GetMolFrags(mol, asMols=True))
     if len(pieces) == 1:
@@ -165,7 +221,7 @@ for name, smiles in records.items():
         print(f"{name:22} {issue.code}: {issue.message} -> {issue.action}")
 
 # ---- Charges ----
-def check_charge(mol):
+def check_charge(mol: Chem.Mol) -> list[Issue]:
     """A net formal charge on the record (charges that cancel, as in nitro groups, are fine)."""
     net = Chem.GetFormalCharge(mol)
     if net == 0:
@@ -177,7 +233,7 @@ for smiles in ["C[N+](=O)[O-]", "[NH3+]CC(=O)[O-]", "CC[NH3+]", "CC(=O)[O-]"]:
     print(f"{smiles:18} {check_charge(Chem.MolFromSmiles(smiles))}")
 
 # ---- Stereochemistry ----
-def check_stereo(mol):
+def check_stereo(mol: Chem.Mol) -> list[Issue]:
     """Stereocentres and double bonds whose configuration the record does not give."""
     missing = [
         info
@@ -196,13 +252,7 @@ for smiles in ["CC(C)Cc1ccc(cc1)[C@H](C)C(=O)O", "CC(C)Cc1ccc(cc1)C(C)C(=O)O", "
     print(f"{smiles:32} {check_stereo(Chem.MolFromSmiles(smiles))}")
 
 # ---- Size ----
-from rdkit.Chem import Descriptors
-
-HEAVY_ATOMS = (6, 50)
-MAX_WEIGHT = 700.0
-
-
-def check_size(mol):
+def check_size(mol: Chem.Mol) -> list[Issue]:
     """The largest piece must be between the heavy-atom limits and below the weight limit."""
     piece = max(Chem.GetMolFrags(mol, asMols=True), key=lambda f: f.GetNumHeavyAtoms())
     heavy = piece.GetNumHeavyAtoms()
@@ -225,7 +275,7 @@ print("heavy atoms in the clean library:", min(heavy), "to", max(heavy))
 CHECKS = [check_elements, check_fragments, check_charge, check_stereo, check_size]
 
 
-def validate(smiles):
+def validate(smiles: str) -> list[Issue]:
     """Every issue found in one record: from parsing, or from every check if it can be read."""
     mol, issues = parse(smiles)
     if mol is None:
@@ -235,7 +285,7 @@ def validate(smiles):
     return issues
 
 
-def verdict(issues):
+def verdict(issues: list[Issue]) -> str:
     """Accept a record with no issues or only warnings; quarantine everything else."""
     blocking = [i for i in issues if i.action != "warn"]
     return "quarantine" if blocking else "accept"
@@ -244,14 +294,14 @@ def verdict(issues):
 for smiles in ["CC(=O)Oc1ccccc1C(=O)O", "CC(C)Cc1ccc(cc1)C(C)C(=O)O", "CC[NH3+].[Cl-]"]:
     issues = validate(smiles)
     print(f"{smiles:30} {verdict(issues):10} {[i.code for i in issues]}")
-import pandas as pd
-
 results = dirty.copy()
 results["issues"] = [validate(s) for s in results["smiles"]]
 results["codes"] = [";".join(i.code for i in issues) for issues in results["issues"]]
 results["verdict"] = [verdict(issues) for issues in results["issues"]]
-print(results["verdict"].value_counts().to_string())
 assert len(results) == len(dirty), "every record leaves the gate"
+n_quarantined = int((results["verdict"] == "quarantine").sum())
+log.info("validated %d records: %d accepted", len(results), len(results) - n_quarantined)
+log.warning("quarantined %d records", n_quarantined)
 quarantine = (
     results[results["verdict"] == "quarantine"]
     .explode("issues")
@@ -265,29 +315,24 @@ quarantine = (
 )
 print(len(quarantine), "issues on", quarantine["id"].nunique(), "quarantined records")
 print(quarantine[["id", "code", "message"]].head(6).to_string(index=False, max_colwidth=60))
-every_issue = results.explode("issues").dropna(subset=["issues"])
-summary = (
-    pd.DataFrame(
-        {
-            "id": every_issue["id"],
-            "code": [i.code for i in every_issue["issues"]],
-            "action": [i.action for i in every_issue["issues"]],
-        }
-    )
-    .groupby(["code", "action"])["id"]
-    .nunique()
-    .rename("records")
-    .reset_index()
-    .sort_values(["records", "code"], ascending=[False, True])
-)
+records_per_reason = Counter()
+for issues in results["issues"]:
+    records_per_reason.update({(i.code, i.action) for i in issues})
+summary = pd.DataFrame(
+    [(code, action, n) for (code, action), n in records_per_reason.items()],
+    columns=["code", "action", "records"],
+).sort_values(["records", "code"], ascending=[False, True])
 print(summary.to_string(index=False))
-from pathlib import Path
-
-Path("work").mkdir(exist_ok=True)
 accepted = results[results["verdict"] == "accept"].drop(columns=["issues"])
-accepted.to_parquet("work/accepted.parquet", index=False)
-quarantine.to_parquet("work/quarantine.parquet", index=False)
-print(len(accepted), "accepted +", quarantine["id"].nunique(), "quarantined =", len(dirty))
+accepted_path = WORK / "accepted.parquet"
+quarantine_path = WORK / "quarantine.parquet"
+accepted.to_parquet(accepted_path, index=False)
+quarantine.to_parquet(quarantine_path, index=False)
+n_quarantined = quarantine["id"].nunique()
+assert len(accepted) + n_quarantined == len(dirty), "every record is in one file or the other"
+log.info("wrote %d accepted records to %s", len(accepted), accepted_path.as_posix())
+log.info("wrote %d issues on %d quarantined records to %s", len(quarantine), n_quarantined,
+         quarantine_path.as_posix())  # fmt: skip
 
 # ---- 5. Checks across records: duplicates ----
 readable = results[results["verdict"] == "accept"].copy()

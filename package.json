@@ -1,0 +1,11 @@
+{
+  "name": "monstrous-learn-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run tests/js"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}

@@ -28,18 +28,26 @@ We use 12,000 molecules from the teaching library (`chemlib`, as in the earlier 
 4 workers, so the lesson runs in about a minute on any laptop. The text says how each step scales to
 the full 1,733,400 molecules and beyond.
 
-## 1. One core at a time
+## Setup
 
-### The worker function
-
-The job for each molecule: read the SMILES, write the canonical SMILES (a stand-in for the full
-standardisation of Module 7), and compute the molecular weight, the polar surface area and a Morgan
-fingerprint. The function that does it lives in its own file, `workers.py`, next to this lesson.
-Section 2 explains why; for now, import it:
+Everything this lesson needs is imported and set here, so the settings can be changed in one
+place. Pipeline steps report with `log`; `print` is kept for showing you results; Module 1 explains
+why. The functions that run in other processes are in their own file, `workers.py`, next to this
+lesson; section 2 explains why.
 
 ```python
+import logging
+import pickle
+import shutil
 import sys
+import time
 from pathlib import Path
+
+import dask.dataframe as dd
+import pandas as pd
+from dask.distributed import Client, LocalCluster
+from joblib import Parallel, delayed
+from rdkit import Chem
 
 import chemlib
 
@@ -49,38 +57,75 @@ import chemlib
 sys.path.insert(0, str(Path().resolve()))
 import workers  # noqa: E402  (after the path is set)
 
-Path("work").mkdir(exist_ok=True)
-library = chemlib.library(12_000, seed=9)
+# log lines: level and message only, so the lesson's outputs are the same on every run
+# (a real job would add "%(asctime)s" to the format)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s", force=True)
+log = logging.getLogger(__name__)
+
+WORK = Path("work")  # where the lesson writes its files (git-ignored)
+N_MOLECULES = 12_000  # molecules described with joblib; any number up to chemlib.size()
+SEED = 9  # which molecules; change it for a different sample
+CHUNK = 1_500  # molecules per chunk sent to a worker
+N_JOBS = 4  # worker processes; at most the number of cores your computer has
+WORKER_COUNTS = [2, 4]  # the numbers of workers timed in section 2
+WARM_UP_SMILES, WARM_UP_CHUNK = 40, 10  # a small first call that starts the workers
+CHUNK_SIZES = [5, CHUNK, 6_000]  # the chunk sizes timed in section 4
+N_LOOK_UPS = 40  # stand-in web requests in section 5
+N_THREADS = 8  # threads for work that mostly waits
+DASK_MOLECULES = 24_000  # molecules in the Parquet folder Dask works on
+DASK_PARTITION = 4_000  # molecules per Parquet file (one Dask partition each)
+DASK_START = 1_200_000  # the number of the first of those molecules
+DASK_THREADS = 4  # threads in the local Dask cluster
+MOLECULES = WORK / "molecules"  # Dask's input folder
+DESCRIBED = WORK / "described"  # ... and its output folder
+
+WORK.mkdir(exist_ok=True)
+```
+
+## 1. One core at a time
+
+### The worker function
+
+The job for each molecule: read the SMILES, write the canonical SMILES (a stand-in for the full
+standardisation of Module 7), and compute the molecular weight, the polar surface area and a Morgan
+fingerprint. The function that does it, `workers.describe`, was imported in the Setup block:
+
+```python
+library = chemlib.library(N_MOLECULES, seed=SEED)
 smiles = list(library["smiles"])
 print(len(smiles), "molecules; the first:", smiles[0])
-print(workers.describe(smiles[:2]))
+for row in workers.describe(smiles[:2]):
+    print(row)
 ```
 ```output
 12000 molecules; the first: c1cc(N8CCOCC8)ccc1C(=O)NCc2ccccc2
-[('O=C(NCc1ccccc1)c1ccc(N2CCOCC2)cc1', 296.37, 41.57, 36), ('CCOc1ccc(C(=O)NCc2ccc(F)cc2)cc1', 273.31, 38.33, 35)]
+Description(canonical_smiles='O=C(NCc1ccccc1)c1ccc(N2CCOCC2)cc1', mw=296.37, tpsa=41.57, bits_on=36)
+Description(canonical_smiles='CCOc1ccc(C(=O)NCc2ccc(F)cc2)cc1', mw=273.31, tpsa=38.33, bits_on=35)
 ```
 
 `describe` takes a list of SMILES and returns one row per molecule, in the same order. Working on a
 list, not one molecule, matters: each call to a worker has a fixed cost, so we want each call to do
-a good amount of work.
+a good amount of work. Each row is a named tuple (`collections.namedtuple`, defined in
+`workers.py`): a tuple whose positions also have names, so it prints readably and can be read as
+`row.mw`, yet compares equal to a plain tuple and is as cheap to send between processes.
 
 ### The serial run
 
 First, the plain way, on one core. Timings depend on the computer, so this output is an example:
 
 ```python
-import time
-
 start = time.perf_counter()
 serial = workers.describe(smiles)
 serial_seconds = time.perf_counter() - start
 per_molecule = serial_seconds / len(smiles)
-print(f"{len(smiles):,} molecules in {serial_seconds:.1f} s, {per_molecule * 1e6:.0f} µs each")
-print(f"all {chemlib.size():,} would take about {chemlib.size() * per_molecule / 60:.0f} minutes")
+log.info("%s molecules in %.1f s, %.0f µs each", f"{len(smiles):,}", serial_seconds,
+         per_molecule * 1e6)
+log.info("all %s would take about %.0f minutes", f"{chemlib.size():,}",
+         chemlib.size() * per_molecule / 60)
 ```
 ```output varies
-12,000 molecules in 2.8 s, 234 µs each
-all 1,733,400 would take about 7 minutes
+INFO 12,000 molecules in 2.8 s, 234 µs each
+INFO all 1,733,400 would take about 7 minutes
 ```
 
 ## 2. Several cores with joblib
@@ -90,27 +135,25 @@ all 1,733,400 would take about 7 minutes
 **joblib** is the standard tool for this in Python (scikit-learn uses it). `Parallel` starts a set of
 worker processes, `delayed(f)(chunk)` describes one call without making it, and joblib sends the
 calls to the workers and returns the results in the order the calls were given, whichever worker
-finished first. We split the SMILES into chunks of 1,500 and use 4 workers:
+finished first. We split the SMILES into chunks of 1,500 (`CHUNK`) and use 4 workers
+(`N_JOBS`):
 
 ![The library is split into chunks of SMILES; each chunk goes to a free worker process, which returns its rows; the results are joined in the original order](figures/chunks-to-workers.svg)
 
 ```python
-from joblib import Parallel, delayed
-
-
 def chunked(items: list, size: int) -> list[list]:
     """Split a list into consecutive chunks of at most `size` items."""
     return [items[i : i + size] for i in range(0, len(items), size)]
 
 
-chunks = chunked(smiles, 1_500)
-parts = Parallel(n_jobs=4)(delayed(workers.describe)(chunk) for chunk in chunks)
+chunks = chunked(smiles, CHUNK)
+parts = Parallel(n_jobs=N_JOBS)(delayed(workers.describe)(chunk) for chunk in chunks)
 in_parallel = [row for part in parts for row in part]
-print(len(chunks), "chunks of", len(chunks[0]), "->", len(in_parallel), "rows")
+log.info("%d chunks of %d -> %d rows", len(chunks), len(chunks[0]), len(in_parallel))
 print("identical to the serial run:", in_parallel == serial)
 ```
 ```output
-8 chunks of 1500 -> 12000 rows
+INFO 8 chunks of 1500 -> 12000 rows
 identical to the serial run: True
 ```
 
@@ -125,18 +168,19 @@ running between calls, so a small call first starts them, and the timings measur
 than the start-up:
 
 ```python
+warm_up = chunked(smiles[:WARM_UP_SMILES], WARM_UP_CHUNK)
 speed_up = {1: 1.0}
-for n_jobs in [2, 4]:
-    Parallel(n_jobs=n_jobs)(delayed(workers.describe)(c) for c in chunked(smiles[:40], 10))
+for n_jobs in WORKER_COUNTS:
+    Parallel(n_jobs=n_jobs)(delayed(workers.describe)(c) for c in warm_up)
     start = time.perf_counter()
     Parallel(n_jobs=n_jobs)(delayed(workers.describe)(chunk) for chunk in chunks)
     seconds = time.perf_counter() - start
     speed_up[n_jobs] = serial_seconds / seconds
-    print(f"n_jobs={n_jobs}: {seconds:.1f} s, {speed_up[n_jobs]:.1f} times the serial speed")
+    log.info("n_jobs=%d: %.1f s, %.1f times the serial speed", n_jobs, seconds, speed_up[n_jobs])
 ```
 ```output varies
-n_jobs=2: 1.4 s, 2.0 times the serial speed
-n_jobs=4: 0.8 s, 3.5 times the serial speed
+INFO n_jobs=2: 1.4 s, 2.0 times the serial speed
+INFO n_jobs=4: 0.8 s, 3.5 times the serial speed
 ```
 
 The speed-up grows with the workers but falls short of the number of workers, and the gap widens
@@ -184,10 +228,6 @@ process and unpickled there, and the results come back the same way. What we sen
 cost. Compare one chunk of SMILES with the same chunk as RDKit molecules:
 
 ```python
-import pickle
-
-from rdkit import Chem
-
 chunk = chunks[0]
 as_text = pickle.dumps(chunk)
 as_molecules = pickle.dumps([Chem.MolFromSmiles(s) for s in chunk])
@@ -213,16 +253,17 @@ the 12,000 molecules with 4 workers and three chunk sizes. `batch_size=1` tells 
 every chunk as a task of its own, as plain `multiprocessing` would:
 
 ```python
-for size in [5, 1_500, 6_000]:
+for size in CHUNK_SIZES:
     pieces = chunked(smiles, size)
     start = time.perf_counter()
-    Parallel(n_jobs=4, batch_size=1)(delayed(workers.describe)(piece) for piece in pieces)
-    print(f"chunks of {size:>5,}: {len(pieces):>5,} tasks, {time.perf_counter() - start:.1f} s")
+    Parallel(n_jobs=N_JOBS, batch_size=1)(delayed(workers.describe)(piece) for piece in pieces)
+    log.info("chunks of %5s: %5s tasks, %.1f s", f"{size:,}", f"{len(pieces):,}",
+             time.perf_counter() - start)
 ```
 ```output varies
-chunks of     5: 2,400 tasks, 1.4 s
-chunks of 1,500:     8 tasks, 0.7 s
-chunks of 6,000:     2 tasks, 1.4 s
+INFO chunks of     5: 2,400 tasks, 1.4 s
+INFO chunks of 1,500:     8 tasks, 0.7 s
+INFO chunks of 6,000:     2 tasks, 1.4 s
 ```
 
 Thousands of tiny tasks spend part of their time on the overheads, and 2 chunks of 6,000 keep only
@@ -282,17 +323,18 @@ cheaper to start than processes and share memory, are enough. `workers.look_up` 
 request that takes 50 milliseconds:
 
 ```python
-ids = list(library["id"][:40])
+ids = list(library["id"][:N_LOOK_UPS])
 start = time.perf_counter()
 one_by_one = [workers.look_up(i) for i in ids]
 waited = time.perf_counter() - start
 start = time.perf_counter()
-threaded = Parallel(n_jobs=8, prefer="threads")(delayed(workers.look_up)(i) for i in ids)
-print(f"40 look-ups one by one: {waited:.1f} s; with 8 threads: {time.perf_counter() - start:.1f} s")
+threaded = Parallel(n_jobs=N_THREADS, prefer="threads")(delayed(workers.look_up)(i) for i in ids)
+log.info("%d look-ups one by one: %.1f s; with %d threads: %.1f s", len(ids), waited, N_THREADS,
+         time.perf_counter() - start)
 print("same results:", threaded == one_by_one)
 ```
 ```output varies
-40 look-ups one by one: 2.2 s; with 8 threads: 0.3 s
+INFO 40 look-ups one by one: 2.2 s; with 8 threads: 0.3 s
 same results: True
 ```
 
@@ -315,14 +357,11 @@ Write 24,000 molecules (twice as many as before) as six Parquet files of 4,000, 
 they are never all in memory:
 
 ```python
-import shutil
-
-folder = Path("work/molecules")
-shutil.rmtree(folder, ignore_errors=True)
-folder.mkdir(parents=True)
-for k, batch in enumerate(chemlib.stream(24_000, batch=4_000, start=1_200_000)):
-    batch.to_parquet(folder / f"part-{k:02d}.parquet", index=False)
-print(sorted(p.name for p in folder.iterdir()))
+shutil.rmtree(MOLECULES, ignore_errors=True)
+MOLECULES.mkdir(parents=True)
+for k, batch in enumerate(chemlib.stream(DASK_MOLECULES, batch=DASK_PARTITION, start=DASK_START)):
+    batch.to_parquet(MOLECULES / f"part-{k:02d}.parquet", index=False)
+print(sorted(p.name for p in MOLECULES.iterdir()))
 ```
 ```output
 ['part-00.parquet', 'part-01.parquet', 'part-02.parquet', 'part-03.parquet', 'part-04.parquet', 'part-05.parquet']
@@ -336,10 +375,7 @@ function on each partition" to the plan; `meta` tells Dask what the result will 
 does not have to run the function to find out. Nothing is computed yet:
 
 ```python
-import dask.dataframe as dd
-import pandas as pd
-
-molecules = dd.read_parquet(folder)
+molecules = dd.read_parquet(MOLECULES)
 meta = pd.DataFrame({"id": [], "vendor": [], **{c: [] for c in workers.COLUMNS}})
 meta = meta.astype({"id": "string", "vendor": "string", **workers.COLUMNS})
 described = molecules.map_partitions(workers.describe_frame, meta=meta)
@@ -365,14 +401,12 @@ speed-up; for RDKit work, a cluster needs worker processes, as below. The cluste
 and no partition waits for the others to finish:
 
 ```python
-from dask.distributed import Client, LocalCluster
-
-cluster = LocalCluster(n_workers=1, threads_per_worker=4, processes=False)
+cluster = LocalCluster(n_workers=1, threads_per_worker=DASK_THREADS, processes=False)
 client = Client(cluster)
-shutil.rmtree("work/described", ignore_errors=True)  # old files would be read back with the new
-described.to_parquet("work/described", write_index=False)
+shutil.rmtree(DESCRIBED, ignore_errors=True)  # old files would be read back with the new
+described.to_parquet(DESCRIBED, write_index=False)
 
-result = dd.read_parquet("work/described")
+result = dd.read_parquet(DESCRIBED)
 summary = result.groupby("vendor").agg({"id": "count", "mw": "mean", "bits_on": "mean"})
 print(summary.compute().round(2).sort_index().to_string())
 client.close()
@@ -391,9 +425,9 @@ next Dask step. As with joblib, check the answer: the rows Dask wrote for the fi
 the rows a direct, serial call gives:
 
 ```python
-first_file = pd.read_parquet(folder / "part-00.parquet")
+first_file = pd.read_parquet(MOLECULES / "part-00.parquet")
 direct = workers.describe(list(first_file["smiles"]))
-from_dask = pd.read_parquet("work/described").set_index("id").loc[first_file["id"]]
+from_dask = pd.read_parquet(DESCRIBED).set_index("id").loc[first_file["id"]]
 rows = list(from_dask[list(workers.COLUMNS)].itertuples(index=False, name=None))
 print(len(rows), "rows; Dask matches a direct call:", rows == direct)
 ```

@@ -28,16 +28,49 @@ and runnable on its own. The lesson imports it and walks through it stage by sta
 Python with RDKit, NumPy, pandas, pyarrow, DuckDB, joblib, Pydantic, pydantic-settings and
 tenacity.
 
+## Setup
+
+Everything this lesson needs is imported and set here, so the settings can be changed in one place.
+The pipeline's own settings live in its settings class (Section 2); these are the lesson's.
+Pipeline steps report with `log`; `print` is kept for showing you results; Module 1 explains why.
+
 ```python
+import json
+import logging
 import shutil
 import sys
+import time
+from datetime import datetime, timedelta
 from pathlib import Path
+
+import duckdb
+import numpy as np
+import pandas as pd
+from pydantic import ValidationError
 
 sys.path.insert(0, ".")  # this module's folder, where pipeline.py lives, so Python can find it
 import pipeline  # noqa: E402  (after the path is set)
 
-Path("work").mkdir(exist_ok=True)
-for old in ["work/capstone", "work/capstone-again"]:  # start the lesson from nothing
+# log lines: level and message only, so the lesson's outputs are the same on every run
+# (a real job would add "%(asctime)s" to the format)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s", force=True)
+log = logging.getLogger(__name__)
+
+# where the lesson's runs write: data, run record (DuckDB), log and manifest
+WORK = Path("work")
+OUT_DIR = WORK / "capstone"  # the run that crashes and resumes
+OUT_DIR_AGAIN = WORK / "capstone-again"  # the uninterrupted run of Section 9
+DATABASE = OUT_DIR / "pipeline.duckdb"
+MANIFEST = OUT_DIR / "manifest.json"
+
+RETRY_WAIT_S = 0.01  # seconds before the first retry; short, so the lesson runs quickly
+START = datetime(2027, 1, 18, 2, 0)  # the injected clock starts at 02:00 UTC
+FLAKY_READS = {3: 2}  # injected fault: batch 3's first two reads fail
+CRASH_IN_BATCH = 12  # injected fault: the process "dies" in batch 12, before its checkpoint
+MOVED_BATCH = 7  # the batch whose compounds file is moved away in Section 7
+
+WORK.mkdir(exist_ok=True)
+for old in (OUT_DIR, OUT_DIR_AGAIN):  # start the lesson from nothing
     shutil.rmtree(old, ignore_errors=True)
 print(f"molecules the library generator can make: {pipeline.chemlib.size():,}")
 ```
@@ -76,7 +109,7 @@ limits, and each can be overridden by an environment variable (`CAPSTONE_N_MOLEC
 `CAPSTONE_WORKERS` and so on), so the same code runs a 10,000-molecule lesson and the full library:
 
 ```python
-settings = pipeline.Settings(out_dir=Path("work/capstone"), retry_wait_s=0.01)
+settings = pipeline.Settings(out_dir=OUT_DIR, retry_wait_s=RETRY_WAIT_S)
 for name, value in settings.model_dump(exclude={"out_dir"}).items():
     print(f"{name:14} {value}")
 ```
@@ -96,8 +129,6 @@ The lesson shortens the wait between retries so it runs quickly. A mistake in th
 the run in its first second, with every problem listed, rather than three hours in:
 
 ```python
-from pydantic import ValidationError
-
 try:
     pipeline.Settings(batch_size=0, defect_rate=2, n_molecules=5_000_000)
 except ValidationError as err:
@@ -147,13 +178,16 @@ common reason for a "resumable" pipeline to give a different answer after a resu
 Reading from a real supplier or database fails now and then: a connection is reset, a server is
 busy. `read_with_retries` wraps the read in tenacity (Module 10): connection errors are retried
 with exponential back-off, up to `max_attempts`, and every retry is logged as a JSON line (Module
-14). Here the source fails twice on purpose before it answers:
+14). Here the source fails twice on purpose before it answers.
+
+The pipeline logs with `logging.getLogger(__name__)`, kept in the module as `log` (so here it is
+`pipeline.log`: the variable, not the file of that name). During a run it writes to the run's log
+file only. For this demonstration we add a screen handler to it, a plain `StreamHandler` with the
+pipeline's JSON formatter, and stop it passing its lines on to the Setup block's plain handler,
+which would show each one a second time. The clock is injected (as in Module 14), so the times in
+the log are the same on every run:
 
 ```python
-import logging
-from datetime import datetime, timedelta
-
-
 class Tick:
     """A clock for repeatable run records: each reading is one second after the last."""
 
@@ -166,20 +200,15 @@ class Tick:
         return self.time
 
 
-class PrintHandler(logging.Handler):
-    """Print each log line, so it shows in a notebook."""
+screen = logging.StreamHandler()
+screen.setFormatter(pipeline.JsonFormatter(Tick(START)))
+pipeline.log.addHandler(screen)  # run() replaces it with the run's log file
+pipeline.log.propagate = False
+```
 
-    def emit(self, record):
-        """Print one formatted record."""
-        print(self.format(record))
-
-
-demo_log = logging.getLogger("capstone-demo")
-demo_log.handlers.clear()
-demo_log.addHandler(PrintHandler())
-demo_log.handlers[0].setFormatter(pipeline.JsonFormatter(Tick(datetime(2027, 1, 18, 2, 0))))
-flaky = pipeline.Faults(flaky_reads={3: 2})
-batch, attempts = pipeline.read_with_retries(settings, 3, flaky, demo_log)
+```python
+flaky = pipeline.Faults(flaky_reads=FLAKY_READS)
+batch, attempts = pipeline.read_with_retries(settings, 3, flaky)
 print("batch 3 read after", attempts, "attempts:", len(batch), "records")
 ```
 ```output
@@ -196,8 +225,6 @@ Module 7, then check the elements), then calculates the InChIKey, descriptors, a
 fingerprint and the first PAINS match. Eight hand-made records show every outcome:
 
 ```python
-import pandas as pd
-
 examples = pd.DataFrame(
     {
         "id": [f"EX-{k}" for k in range(1, 9)],
@@ -292,8 +319,6 @@ Each kept molecule carries its descriptors and a 2048-bit Morgan fingerprint pac
 eight times smaller than one byte per bit and easy to unpack with NumPy:
 
 ```python
-import numpy as np
-
 fingerprint = kept["morgan2"].iloc[0]
 bits = np.unpackbits(np.frombuffer(fingerprint, dtype=np.uint8))
 print(f"{len(fingerprint)} bytes, {len(bits)} bits, {bits.sum()} set")
@@ -319,28 +344,24 @@ batch 12, after writing its files and before its checkpoint. The clock is inject
 record is the same on every computer; the timer measures the real time.
 
 ```python
-import time
-
-import duckdb
-
-clock = Tick(datetime(2027, 1, 18, 2, 0))
-faults = pipeline.Faults(flaky_reads={3: 2}, crash_in_batch=12)
+clock = Tick(START)
+faults = pipeline.Faults(flaky_reads=FLAKY_READS, crash_in_batch=CRASH_IN_BATCH)
 started = time.perf_counter()
 try:
     pipeline.run(settings, clock, faults)
 except pipeline.SimulatedCrash as crash:
-    print("crashed:", crash)
+    log.error("crashed: %s", crash)
 seconds = {"crashed run": time.perf_counter() - started}
 
-with duckdb.connect("work/capstone/pipeline.duckdb", read_only=True) as db:
+with duckdb.connect(str(DATABASE), read_only=True) as db:
     print(db.sql("SELECT run_id, status FROM runs").df().to_string(index=False))
     done = db.sql("SELECT count(*), max(batch) FROM batches").fetchall()[0]
 print(f"checkpointed: {done[0]} batches (0 to {done[1]}) of {pipeline.n_batches(settings)}")
-print("batch 12's files are on disk:",
-      pipeline.partition(settings, "compounds", 12).exists())
+print(f"batch {CRASH_IN_BATCH}'s files are on disk:",
+      pipeline.partition(settings, "compounds", CRASH_IN_BATCH).exists())
 ```
 ```output
-crashed: killed after writing batch 12, before its checkpoint
+ERROR crashed: killed after writing batch 12, before its checkpoint
  run_id  status
 run-001 running
 checkpointed: 12 batches (0 to 11) of 20
@@ -356,7 +377,7 @@ started = time.perf_counter()
 manifest = pipeline.run(settings, clock)
 seconds["resumed run"] = time.perf_counter() - started
 
-with duckdb.connect("work/capstone/pipeline.duckdb", read_only=True) as db:
+with duckdb.connect(str(DATABASE), read_only=True) as db:
     print(db.sql("SELECT run_id, status, batches FROM runs ORDER BY run_id").df()
           .to_string(index=False))
     print(db.sql("SELECT run_id, count(*) AS batches, min(batch) AS first, max(batch) AS last, "
@@ -404,9 +425,9 @@ Checking the files against the record catches what counting inside the code cann
 overwritten after the run. Move one partition away and reconcile again:
 
 ```python
-moved = pipeline.partition(settings, "compounds", 7)
+moved = pipeline.partition(settings, "compounds", MOVED_BATCH)
 moved.rename(moved.with_suffix(".bak"))
-with duckdb.connect("work/capstone/pipeline.duckdb") as db:
+with duckdb.connect(str(DATABASE)) as db:
     try:
         pipeline.reconcile(db, settings)
     except pipeline.ReconciliationError as err:
@@ -423,7 +444,7 @@ matching reason, every salt and solvent should have been fixed, and one record o
 pair removed.
 
 ```python
-with duckdb.connect("work/capstone/pipeline.duckdb", read_only=True) as db:
+with duckdb.connect(str(DATABASE), read_only=True) as db:
     truth = db.sql("""
         SELECT defect, 'quarantine: ' || reason AS outcome, count(*) AS records
         FROM quarantine GROUP BY ALL
@@ -467,9 +488,7 @@ the rules and their hash, the package versions, the reconciled counts, and the S
 output file, with one hash over all of them for the whole dataset.
 
 ```python
-import json
-
-manifest = json.loads(Path("work/capstone/manifest.json").read_text(encoding="utf-8"))
+manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
 print("runs:", manifest["runs"])
 print("input:", manifest["input"]["source"], manifest["input"]["n_molecules"], "molecules, seed",
       manifest["input"]["seed"], "defect rate", manifest["input"]["defect_rate"])
@@ -494,9 +513,9 @@ what a run that never crashed produces. Run the pipeline again, uninterrupted, i
 and compare the hash of every output file:
 
 ```python
-again_settings = settings.model_copy(update={"out_dir": Path("work/capstone-again")})
+again_settings = settings.model_copy(update={"out_dir": OUT_DIR_AGAIN})
 started = time.perf_counter()
-again = pipeline.run(again_settings, Tick(datetime(2027, 1, 18, 2, 0)))
+again = pipeline.run(again_settings, Tick(START))
 seconds["uninterrupted run"] = time.perf_counter() - started
 print("same counts:", again["counts"] == manifest["counts"])
 print("same files, byte for byte:", again["outputs"] == manifest["outputs"])
@@ -523,10 +542,10 @@ print(f"about {rate:,.0f} records per second with {settings.workers} workers")
 print(f"the whole library at that rate: about {pipeline.chemlib.size() / rate / 3600:.1f} hours")
 ```
 ```output varies
-crashed run         20.1 s
-resumed run         10.1 s
-uninterrupted run   24.0 s
-about 418 records per second with 4 workers
+crashed run         27.6 s
+resumed run         10.8 s
+uninterrupted run   24.5 s
+about 409 records per second with 4 workers
 the whole library at that rate: about 1.2 hours
 ```
 
@@ -539,7 +558,7 @@ The funnel, from records in to compounds out:
 ![The run's records at each stage: records read, readable, standardised, unique and passing the filters, with the number leaving at each step](figures/funnel.svg)
 
 ```python
-with duckdb.connect("work/capstone/pipeline.duckdb", read_only=True) as db:
+with duckdb.connect(str(DATABASE), read_only=True) as db:
     print(db.sql("""
         SELECT reason, count(*) AS records FROM removed
         WHERE reason <> 'PAINS' GROUP BY reason

@@ -1,0 +1,255 @@
+{
+  "data-engineering/series-1": {
+    "title": "The big picture: a chemist thinking like a data engineer",
+    "intro": "A chemist would solve this one file at a time. A data engineer solves it once, for every file, every week, without anyone watching. The diagram is that solution, step by step, with the module that teaches each step. Choose a step to see why it matters, how it is done, where the course covers it and when it happens.",
+    "stages": [
+      {
+        "id": "sources",
+        "label": "Sources",
+        "asks": "Where did these molecules come from, and can I trust them?",
+        "answer": "Know every source, its format and its quirks, before reading a single record.",
+        "why": "Chemical data arrives from instruments, supplier catalogues, public databases and lab notebooks, each in its own format and each with its own errors. A pipeline is only as good as what it is fed.",
+        "how": [
+          "Supplier SDF and SMILES files",
+          "ChEMBL and PubChem web services",
+          "Electronic lab notebooks and instrument exports",
+          "A record of where every file came from"
+        ],
+        "modules": [
+          3,
+          11
+        ],
+        "when": "Before anything else, and again whenever a new source is added.",
+        "phase": "Bring it in"
+      },
+      {
+        "id": "represent",
+        "label": "Read and represent",
+        "asks": "What is a molecule to a computer?",
+        "answer": "Choose the representation that fits the job: a graph, a matrix, a string or a fingerprint.",
+        "why": "Every later step, from validation to machine learning, works on a representation. Choosing the wrong one loses information (stereochemistry, charges) or makes a fast job slow.",
+        "how": [
+          "Molecules as graphs with NetworkX",
+          "Adjacency and bond-order matrices in NumPy",
+          "SMILES, SMARTS, InChI and fingerprints",
+          "Reading files with RDKit and Open Babel, and seeing where toolkits disagree"
+        ],
+        "modules": [
+          1,
+          2,
+          3
+        ],
+        "when": "Every time a molecule is read in or handed to another tool.",
+        "phase": "Bring it in"
+      },
+      {
+        "id": "ingest",
+        "label": "Ingest",
+        "asks": "New compounds arrived this week. Do I have to start again?",
+        "answer": "Load only what is new, safely, so running the job twice gives the same result.",
+        "why": "Re-downloading and reprocessing everything wastes hours and hides what changed. Ingestion that is incremental and repeatable can run every night.",
+        "how": [
+          "Watermarks: remember how far the last run got",
+          "Idempotent loads that can be repeated safely",
+          "Polite API use: paging, retries and rate limits",
+          "Identity by InChIKey, so the same compound is not loaded twice"
+        ],
+        "modules": [
+          3,
+          11
+        ],
+        "when": "On a schedule (nightly, weekly) or when a supplier sends a file.",
+        "phase": "Bring it in"
+      },
+      {
+        "id": "validate-molecules",
+        "label": "Validate molecules",
+        "asks": "Is this structure even chemically possible?",
+        "answer": "Check every structure and record why each rejected one was rejected.",
+        "why": "One broken structure (an impossible valence, an unexpected element) can crash a job or, worse, pass silently into a model. Catching it at the door is cheap; finding it later is not.",
+        "how": [
+          "Parsing and sanitisation errors",
+          "Valence, element, charge and size rules",
+          "Fix, reject or quarantine, with the reason kept"
+        ],
+        "modules": [
+          6
+        ],
+        "when": "As soon as data is read, before it is stored.",
+        "phase": "Make it right"
+      },
+      {
+        "id": "standardise",
+        "label": "Standardise and identify",
+        "asks": "Are these two entries the same compound?",
+        "answer": "Put every structure in one agreed form, then give it one identity.",
+        "why": "Salts, solvents, charges and tautomers make one compound look like many. Without standardisation, counts, joins and models are all wrong.",
+        "how": [
+          "Strip salts and solvents, neutralise charges",
+          "Canonical tautomers with RDKit's rdMolStandardize",
+          "Tested, versioned standardisation rules",
+          "InChIKeys for identity and de-duplication"
+        ],
+        "modules": [
+          7,
+          3
+        ],
+        "when": "After validation, before storing; the same rules every time.",
+        "phase": "Make it right"
+      },
+      {
+        "id": "contract",
+        "label": "Check the contract",
+        "asks": "Is this batch fit for the people who use it?",
+        "answer": "Agree what good data looks like, and test every batch against it.",
+        "why": "A data contract is a written promise between whoever produces data and whoever uses it: columns, types, units, ranges. Testing it stops a bad batch before it reaches a database or a model.",
+        "how": [
+          "Records checked with Pydantic",
+          "Tables checked with Pandera",
+          "Units on one scale (nM and pIC50)",
+          "Stop the batch, or quarantine the bad rows"
+        ],
+        "modules": [
+          12
+        ],
+        "when": "On every batch, before it is published to others.",
+        "phase": "Make it right"
+      },
+      {
+        "id": "store",
+        "label": "Store",
+        "asks": "Where do I keep all this so I can find it again?",
+        "answer": "Model the data first, then pick the store that fits the questions you will ask.",
+        "why": "Relational databases answer structured questions and substructure searches; graph databases follow links between molecules, reactions and targets; columnar files hold millions of rows for analysis.",
+        "how": [
+          "Choosing the kind of database for the questions asked: relational or NoSQL (document, key-value, wide-column, graph, vector)",
+          "Data modelling: entities, relationships, an ER diagram",
+          "Normalised models for recording, star schemas for analysis",
+          "Schemas, keys, constraints and indexes",
+          "Metadata: a data dictionary and provenance columns",
+          "PostgreSQL with the RDKit cartridge",
+          "Neo4j and Cypher for linked data",
+          "Parquet and DuckDB for analysis",
+          "Migrations when the schema changes"
+        ],
+        "modules": [
+          4,
+          5,
+          8,
+          13
+        ],
+        "when": "Once data has passed its checks: one place everybody reads from.",
+        "phase": "Put it to use"
+      },
+      {
+        "id": "compute",
+        "label": "Compute at scale",
+        "asks": "My laptop runs out of memory at a million molecules. Now what?",
+        "answer": "Stream data in batches, use every core, and spread work across machines when one is not enough.",
+        "why": "Virtual libraries now hold billions of molecules. Code that loads everything at once stops working long before that.",
+        "how": [
+          "Streaming and batching with generators",
+          "Compact types and memory measurement",
+          "joblib on one machine, Dask across many"
+        ],
+        "modules": [
+          8,
+          9
+        ],
+        "when": "Whenever the data no longer fits in memory or a job takes too long.",
+        "phase": "Put it to use"
+      },
+      {
+        "id": "serve",
+        "label": "Serve",
+        "asks": "How do my colleagues, my models and my dashboards use this?",
+        "answer": "Publish clean, documented, versioned data that others can rely on.",
+        "why": "Data is only worth the questions it answers: a search, a dashboard, a training set for a model, the tools an AI agent calls.",
+        "how": [
+          "Queries and search",
+          "Machine-learning-ready tables",
+          "Dashboards and reports",
+          "Models and agents (later courses)"
+        ],
+        "modules": [
+          15
+        ],
+        "when": "Continuously, to whoever needs it.",
+        "next": "Series 2 swaps the hand-built parts for industry tools; MLOps for Chemists and Agentic AI in Chemistry build on what is served here.",
+        "phase": "Put it to use"
+      }
+    ],
+    "lanes": [
+      {
+        "id": "reliability",
+        "label": "Reliability",
+        "asks": "The job failed at molecule 600,000. Do I start again?",
+        "answer": "Design every step to fail safely and carry on from where it stopped.",
+        "why": "Long jobs fail: a network drops, a machine restarts, one record is malformed. A reliable pipeline loses minutes, not days.",
+        "how": [
+          "Checkpoints and resume",
+          "Retries with back-off for temporary errors",
+          "Quarantine for records that will never work",
+          "Atomic writes, so a half-written file never counts as done",
+          "Long jobs on a server or virtual machine, in tmux, so they outlive your connection"
+        ],
+        "modules": [
+          10
+        ],
+        "when": "At every step, from the first line of a pipeline."
+      },
+      {
+        "id": "versioning",
+        "label": "Versioning",
+        "asks": "Can I rebuild last month's result exactly?",
+        "answer": "Version code, environments, schemas, rules, data and results, and record which went into what.",
+        "why": "A number nobody can reproduce cannot be trusted or published. Versioning everything makes every result traceable.",
+        "how": [
+          "Git commits and tags",
+          "Lock files and container images",
+          "Numbered database migrations",
+          "Content hashes, manifests and DVC",
+          "A provenance record next to every output"
+        ],
+        "modules": [
+          13
+        ],
+        "when": "Whenever anything changes, and at every run."
+      },
+      {
+        "id": "monitoring",
+        "label": "Monitoring",
+        "asks": "How do I know something went wrong before someone else tells me?",
+        "answer": "Log, measure and alert, so problems show up while they are small.",
+        "why": "Pipelines fail quietly: a supplier changes a format, a rejection rate creeps up, a job slows down. Monitoring turns silent failures into alerts.",
+        "how": [
+          "Structured logs instead of print",
+          "Metrics for every run",
+          "Drift and quality checks",
+          "Alerts with clear rules"
+        ],
+        "modules": [
+          14
+        ],
+        "when": "On every run, and between runs."
+      },
+      {
+        "id": "orchestration",
+        "label": "Orchestration and tools",
+        "asks": "Who runs all of this, in the right order, every night?",
+        "answer": "Hand the schedule, the order and the retries to an orchestrator, once you understand what it does.",
+        "why": "Series 1 builds each idea by hand so you know what the tools do. Series 2 then hands the work to industry tools that do it at scale.",
+        "how": [
+          "The capstone pipeline, end to end (Series 1)",
+          "dlt, DuckDB, dbt and Prefect (Series 2)"
+        ],
+        "modules": [
+          15
+        ],
+        "when": "When a pipeline must run regularly without you."
+      }
+    ],
+    "problem": "Every week, three suppliers send your group their catalogues as SDF and SMILES files, and ChEMBL publishes new activity data. Together that is about two million molecules, and it keeps growing. Some structures will not parse, the same compound arrives under five different names, one supplier quietly changes its file format, and last month's numbers cannot be rebuilt. Your colleagues want one clean, de-duplicated, searchable library, refreshed every Monday, that their models can train on and that can be traced back to its sources. Doing it by hand takes a week, and nobody can repeat it exactly.",
+    "question": "How do you build a pipeline that does it for you, reliably, every week?"
+  }
+}

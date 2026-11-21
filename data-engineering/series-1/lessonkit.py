@@ -30,6 +30,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import logging
 import os
 import re
 import sys
@@ -97,6 +98,46 @@ def available(service: str) -> bool:
     return bool(os.environ.get(SERVICE_ENV.get(service, ""), ""))
 
 
+def _screen_handlers() -> list[logging.StreamHandler]:
+    """Find every logging handler that writes to the screen (not to a file).
+
+    Returns:
+        The stream handlers of the root logger and of every named logger, without file handlers.
+    """
+    loggers = [logging.getLogger()] + [
+        lg for lg in logging.Logger.manager.loggerDict.values() if isinstance(lg, logging.Logger)
+    ]
+    return [
+        h
+        for lg in loggers
+        for h in lg.handlers
+        if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
+    ]
+
+
+@contextlib.contextmanager
+def _capture(out: io.StringIO):
+    """Send what a block prints, and what it logs to the screen, to one buffer.
+
+    Lessons log with the standard `logging` module (a handler set up in their Setup block, writing
+    to the screen); this points those handlers at the buffer while a block runs, so log lines are
+    checked like printed ones, and puts them back afterwards.
+
+    Args:
+        out: The buffer to collect the block's output in.
+    """
+    handlers = _screen_handlers()
+    before = [h.stream for h in handlers]
+    for h in handlers:
+        h.setStream(out)
+    try:
+        with contextlib.redirect_stdout(out):
+            yield
+    finally:
+        for h, stream in zip(handlers, before, strict=True):
+            h.setStream(stream)
+
+
 def run(text: str, folder: Path) -> list[tuple[str | None, str | None, str]]:
     """Run every python block in order and capture what each prints.
 
@@ -134,7 +175,7 @@ def run(text: str, folder: Path) -> list[tuple[str | None, str | None, str]]:
                 results.append((None, shown, shown_kind))
                 continue
             out = io.StringIO()
-            with contextlib.redirect_stdout(out):
+            with _capture(out):
                 # dont_inherit: lesson code must not inherit this file's `from __future__`
                 # imports (they would turn type hints into strings, which breaks Pydantic models)
                 name = f"{folder.name}/lesson.md block {i + 1}"

@@ -1,7 +1,8 @@
 """Draw the figures of Module 9 (figures/*.svg): chunks going to workers, and a measured speed-up.
 
 Usage (from the series folder):
-    uv run python 09-parallel-and-distributed/figures.py
+    uv run python 09-parallel-and-distributed/figures.py                      # every figure
+    uv run python 09-parallel-and-distributed/figures.py chunks-to-workers    # only those named
 
 The speed-up chart is measured: it times the lesson's describe step on the lesson's 12,000
 molecules with 1, 2, 4 and 8 joblib workers (the fastest of three runs each), and fits Amdahl's
@@ -30,7 +31,12 @@ import chemlib  # noqa: E402
 from figurekit import CYAN, INK, MUTED, VIOLET  # noqa: E402
 
 OUT = HERE / "figures"
-N_JOBS = [1, 2, 4, 8]
+N_JOBS = [1, 2, 4, 8]  # the numbers of workers timed
+# the lesson's molecules (its Setup block's N_MOLECULES and SEED)
+N_MOLECULES = 12_000
+SEED = 9
+CHUNK = 750  # half the lesson's chunk, so that 8 workers still get two chunks each
+RUNS = 3  # timed runs per point; the fastest is kept
 
 
 def _text(x: float, y: float, words: str, size: int = 13, colour: str = INK, anchor: str = "start",
@@ -100,13 +106,13 @@ def _fit_amdahl(n_jobs: list[int], speed_up: list[float]) -> float:
 
 def speed_up() -> str:
     """Measured speed-up against workers, beside the ideal and Amdahl's law fitted to it."""
-    smiles = list(chemlib.library(12_000, seed=9)["smiles"])
-    chunks = [smiles[i : i + 750] for i in range(0, len(smiles), 750)]
+    smiles = list(chemlib.library(N_MOLECULES, seed=SEED)["smiles"])
+    chunks = [smiles[i : i + CHUNK] for i in range(0, len(smiles), CHUNK)]
     seconds = {}
     for n in N_JOBS:
         Parallel(n_jobs=n)(delayed(workers.describe)(c) for c in chunks[:n])  # start the workers
         runs = []
-        for _ in range(3):  # the fastest of three runs: less disturbed by other programs
+        for _ in range(RUNS):  # the fastest of several runs: less disturbed by other programs
             start = time.perf_counter()
             Parallel(n_jobs=n)(delayed(workers.describe)(c) for c in chunks)
             runs.append(time.perf_counter() - start)
@@ -129,7 +135,7 @@ def speed_up() -> str:
     ax.set_ylim(0, 8.5)
     ax.spines[["top", "right"]].set_visible(False)
     ax.legend(frameon=False, loc="upper left")
-    ax.set_title("One measured run (12,000 molecules); yours will differ", fontsize=10,
+    ax.set_title(f"One measured run ({N_MOLECULES:,} molecules); yours will differ", fontsize=10,
                  color=MUTED, loc="left")  # fmt: skip
     fig.tight_layout()
     path = OUT / "speed-up.svg"
@@ -139,10 +145,11 @@ def speed_up() -> str:
 
 
 def main() -> None:
-    """Write every figure."""
+    """Write every figure, or those named on the command line."""
     OUT.mkdir(exist_ok=True)
     figures = {"chunks-to-workers": chunks_to_workers, "speed-up": speed_up}
-    for name, make in figures.items():
+    for name in sys.argv[1:] or list(figures):
+        make = figures[name]
         (OUT / f"{name}.svg").write_text(make(), encoding="utf-8")
         print(f"figures/{name}.svg")
 
