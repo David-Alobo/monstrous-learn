@@ -24,7 +24,7 @@
           "title": "Data Engineering for Cheminformatics",
           "tagline": "From SDF files to chemical data pipelines that scale to millions of molecules, survive failures and can be trusted.",
           "status": "January 2027",
-          "level": "For chemists who know some Python",
+          "level": "Beginner-friendly, every term explained",
           "summary": "Fifteen modules on the engineering that sits between raw chemical files and machine learning. It starts with how molecules are represented and stored, in relational and graph databases; then the course turns to what breaks in practice: libraries too big for memory, jobs that need many cores, pipelines that fail halfway, data that drifts, and results nobody can reproduce. Each idea is built by hand first, so you understand it before Series 2 hands it to industry tools.",
           "tools": [
             "Python",

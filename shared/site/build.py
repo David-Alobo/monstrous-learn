@@ -1020,6 +1020,30 @@ def guide_pages(cat: dict, root: Path) -> dict[Path, str]:
     return pages
 
 
+COLAB_BADGE = "https://colab.research.google.com/assets/colab-badge.svg"
+GITHUB_REPO = REPO_URL.removeprefix("https://github.com/")
+
+
+def module_links(cat: dict, t: dict, s: dict, src: Path) -> str:
+    """One module's links for a README: the lesson online, the notebook in Colab, its folder.
+
+    Args:
+        cat: The catalogue.
+        t: The module's track.
+        s: The module's course.
+        src: The module's folder in the repository.
+
+    Returns:
+        The links, as one line of Markdown.
+    """
+    page = f"https://monstrous.com.ng{url(cat, t, s)}{src.name}/"
+    colab = (
+        f"https://colab.research.google.com/github/{GITHUB_REPO}/blob/main/"
+        f"{s['folder']}/{src.name}/notebook.ipynb"
+    )
+    return f"[Read the lesson]({page}) · [![Open in Colab]({COLAB_BADGE})]({colab})"
+
+
 def readme(cat: dict, t: dict, s: dict) -> str:
     """A course folder's README, written from the catalogue so the two never disagree.
 
@@ -1037,7 +1061,8 @@ def readme(cat: dict, t: dict, s: dict) -> str:
         "",
         f"Track: {t['title']}. {s['tagline']}",
         "",
-        f"**Status:** {status} · **Level:** {s['level']}",
+        f"**Status:** {status} · **Level:** {s['level']} · "
+        f"**[Read it online](https://monstrous.com.ng{url(cat, t, s)})**",
         "",
         s["summary"],
         "",
@@ -1050,14 +1075,30 @@ def readme(cat: dict, t: dict, s: dict) -> str:
             lines += ["", f"### {part}", ""]
         elif part is None and m is s["modules"][0]:
             lines.append("")
-        tools = f" ({', '.join(m['tools'])})" if m["tools"] else ""
-        lines.append(f"{m['number']}. **{m['title']}.** {m['what']}{tools}")
+        tools = f" *{', '.join(m['tools'])}*" if m["tools"] else ""
+        src = lessons.folder(s["folder"], m["number"])
+        if src is None:
+            lines.append(f"{m['number']}. **{m['title']}.** {m['what']}{tools}")
+            continue
+        lines += [
+            f"{m['number']}. **[{m['title']}]({src.name}/)**. {m['what']}{tools}",
+            "",
+            f"   {module_links(cat, t, s, src)}",
+            "",
+        ]
+    if any(lessons.folder(s["folder"], m["number"]) for m in s["modules"]):
+        lines += [
+            "",
+            "Each module folder holds the lesson (`lesson.md`), a notebook, the code on its own",
+            "and the homework. New to notebooks?",
+            "[Start here](https://monstrous.com.ng/learn/start/) shows every step.",
+        ]
+    else:
+        lines += ["", "Each module will have its own folder here, with its lesson and notebook."]
     lines += [
         "",
-        "Each module will have its own folder here (`01-…`, `02-…`) with its code, tests, lesson",
-        "and notebook. This file is written from `shared/site/catalogue.json` by",
-        "`python -m shared.site.build`; the course page is",
-        f"https://monstrous.com.ng{url(cat, t, s)}.",
+        "*This file is written from `shared/site/catalogue.json` by `python -m shared.site.build`;",
+        f"the course page is https://monstrous.com.ng{url(cat, t, s)}.*",
     ]
     return "\n".join(lines) + "\n"
 
@@ -1087,6 +1128,47 @@ def track_readme(cat: dict, t: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+MODULES_START = "<!-- modules:start (written by python -m shared.site.build) -->"
+MODULES_END = "<!-- modules:end -->"
+
+
+def root_readme(cat: dict, text: str) -> str:
+    """The repository's front page with its table of written modules brought up to date.
+
+    The front page is written by hand, except the part between MODULES_START and MODULES_END,
+    which lists every written module with its lesson and notebook links.
+
+    Args:
+        cat: The catalogue.
+        text: The README as it stands.
+
+    Returns:
+        The README with that part rewritten (unchanged if it has no markers).
+    """
+    if MODULES_START not in text:
+        return text
+    rows = []
+    for t in cat["tracks"]:
+        for s in t["series"]:
+            written = [(m, lessons.folder(s["folder"], m["number"])) for m in s["modules"]]
+            written = [(m, src) for m, src in written if src is not None]
+            if not written:
+                continue
+            rows += [
+                f"**Series {s['number']}: {s['title']}**",
+                "",
+                "| # | Module | Read or run it |",
+                "|---|---|---|",
+            ]
+            for m, src in written:
+                title = f"[{m['title']}]({s['folder']}/{src.name}/)"
+                rows.append(f"| {m['number']} | {title} | {module_links(cat, t, s, src)} |")
+            rows.append("")
+    head, rest = text.split(MODULES_START, 1)
+    _, tail = rest.split(MODULES_END, 1)
+    return head + MODULES_START + "\n\n" + "\n".join(rows) + "\n" + MODULES_END + tail
+
+
 def readmes(cat: dict) -> dict[Path, str]:
     """Every README the catalogue defines: one per track and one per course.
 
@@ -1097,6 +1179,9 @@ def readmes(cat: dict) -> dict[Path, str]:
         Each README's path and text.
     """
     out = {}
+    root = Path("README.md")
+    if root.exists():
+        out[root] = root_readme(cat, root.read_text(encoding="utf-8"))
     for t in cat["tracks"]:
         out[Path(t["folder"], "README.md")] = track_readme(cat, t)
         for s in t["series"]:
