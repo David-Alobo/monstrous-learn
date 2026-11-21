@@ -6,7 +6,7 @@ function form(changes = {}) {
   const fields = {
     first_name: " Ada ",
     email: "ada@example.com",
-    courses: ["Data Engineering, Series 1"],
+    courses: ["Data Engineering"],
     country: "Nigeria",
     role: "PhD student",
     position: "Research Scientist",
@@ -27,9 +27,9 @@ function form(changes = {}) {
 
 describe("answersFrom", () => {
   it("reads and trims every answer, with courses as a list", () => {
-    const a = answersFrom(form({ courses: ["Data Engineering, Series 1", "MLOps for Chemists"] }));
+    const a = answersFrom(form({ courses: ["Data Engineering", "MLOps for Chemists"] }));
     expect(a.first_name).toBe("Ada");
-    expect(a.courses).toEqual(["Data Engineering, Series 1", "MLOps for Chemists"]);
+    expect(a.courses).toEqual(["Data Engineering", "MLOps for Chemists"]);
     expect(a.consent).toBe(true);
     expect(a.trap).toBe("");
   });
@@ -60,7 +60,7 @@ describe("toBody", () => {
     const body = toBody(answersFrom(form()));
     expect(body.get("email")).toBe("ada@example.com");
     expect(body.get("first_name")).toBe("Ada");
-    expect(body.getAll("courses[]")).toEqual(["Data Engineering, Series 1"]);
+    expect(body.getAll("courses[]")).toEqual(["Data Engineering"]);
     expect(body.get("country")).toBe("Nigeria");
     expect(body.get("position")).toBe("Research Scientist");
     expect(body.has("field_of_study")).toBe(false);

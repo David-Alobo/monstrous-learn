@@ -75,7 +75,7 @@ WAITLIST = "/learn/waitlist/"
 WAITLIST_ENDPOINT = "/wp-json/monstrous/v1/waitlist"
 COUNTRIES = HERE / "countries.json"  # every country's English name, for the form's country list
 # the waitlist's questions with a fixed list of answers; FluentCRM stores the answer as written here
-COURSE_CHOICES = ["Data Engineering, Series 1", "MLOps for Chemists", "Agentic AI in Chemistry"]
+COURSE_CHOICES = ["Data Engineering", "MLOps for Chemists", "Agentic AI in Chemistry"]
 ROLES = ["Undergraduate student", "MSc student", "PhD student", "Postdoctoral researcher",
          "Academic staff", "Scientist in industry", "Data professional", "Other"]  # fmt: skip
 FIELDS_OF_STUDY = ["Chemistry", "Biochemistry", "Pharmacy or pharmacology", "Materials science",
