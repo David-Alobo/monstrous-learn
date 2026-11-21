@@ -83,6 +83,13 @@ FIELDS_OF_STUDY = ["Chemistry", "Biochemistry", "Pharmacy or pharmacology", "Mat
 PYTHON_LEVELS = ["None yet", "A little", "Comfortable"]
 HEARD_FROM = ["LinkedIn", "Facebook", "A colleague or friend", "A search engine", "Other"]
 GOALS_MAX = 300  # characters; the same limit as waitlist.js
+# the waitlist offer in the side panel of lessons and guides: its own labelled box, so it is not
+# read as the answer to whatever is listed above it
+UPDATES = f"""          <div class="updates">
+            <h3>Course updates</h3>
+            <p>Hear when a course opens. Free, and you can unsubscribe at any time.</p>
+            <a class="btn primary" href="{WAITLIST}">Join the waitlist</a>
+          </div>"""
 ICONS = {
     "read": '<path d="M4 5a2 2 0 012-2h12v16H6a2 2 0 00-2 2zM4 21V5M8 7h6M8 11h6"/>',
     "run": '<path d="M4 4h16v12H4zM8 20h8M12 16v4M8 9l2 2-2 2M12 13h4"/>',
@@ -743,7 +750,7 @@ def lesson_page(
           <h3>New here?</h3>
           <ul><li><a href="{cat["base"]}start/">Start here</a>: how to run a lesson, and what
             each word means</li></ul>
-          <a class="btn primary" href="{WAITLIST}">Join the waitlist</a>
+{UPDATES}
         </aside>
       </div>
       <nav class="next" aria-label="Other modules">
@@ -798,7 +805,7 @@ def guide(cat: dict, title: str, summary: str, html: str, toc: list) -> str:
         <aside class="aside toc">
           <h3>On this page</h3>
           <ul class="contents">{contents}</ul>
-          <a class="btn primary" href="{WAITLIST}">Join the waitlist</a>
+{UPDATES}
         </aside>
       </div>
     </section>

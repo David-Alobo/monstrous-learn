@@ -285,3 +285,8 @@ a.course:hover { border-color: var(--violet); transform: translateY(-2px); }
 .form-status.done { background: rgb(34 211 238 / 0.08); border: 1px solid rgb(34 211 238 / 0.4); color: var(--ink); }
 .form-status.error { background: rgb(248 113 113 / 0.08); border: 1px solid rgb(248 113 113 / 0.5); color: var(--ink); }
 .form-status.note { background: var(--panel-2); border: 1px solid var(--line); color: var(--ink-2); }
+
+/* the waitlist offer in a side panel: a box of its own, set apart from the panel's lists */
+.updates { margin-top: 1.4rem; padding-top: 1.1rem; border-top: 1px solid var(--line); }
+.updates h3 { margin-top: 0; }
+.updates p { color: var(--ink-2); font-size: 0.92rem; margin: 0 0 0.8rem; }
