@@ -708,6 +708,12 @@ run writes its JSON log to `work/capstone/pipeline.log` (inside the `15-capstone
 can open that file to follow it. When it finishes it prints the count at every stage, as in
 Section 7, and the dataset's SHA-256.
 
+If the run fails, it says so in two places, as [Module 10](../10-pipelines-that-survive-failure/)
+taught: the terminal shows a short message ("The run failed:" and the error), and the last line of
+`pipeline.log` is a `run failed` event with the error and its full traceback. The program then ends
+with exit code 1 instead of 0, so a scheduler or a script that runs it knows it failed. In
+PowerShell, `$LASTEXITCODE` shows the last program's exit code; in bash, `echo $?`.
+
 Bigger batches mean fewer files and checkpoints; more workers use more cores. The rate measured in
 Section 9 gives the time to expect. If the run is interrupted (a laptop closed, a power cut), run
 the same command again and it resumes. Nothing in the main process grows with the library except

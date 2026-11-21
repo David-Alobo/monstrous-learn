@@ -720,6 +720,9 @@ class JsonFormatter(logging.Formatter):
         """
         event = {"time": self.clock().isoformat(timespec="seconds"), "level": record.levelname,
                  "event": record.getMessage(), **getattr(record, "fields", {})}  # fmt: skip
+        if record.exc_info:  # logged with log.exception: say what failed, with the full traceback
+            event["error"] = f"{record.exc_info[0].__name__}: {record.exc_info[1]}"
+            event["traceback"] = self.formatException(record.exc_info)
         return json.dumps(event)
 
 
@@ -781,6 +784,9 @@ def run(
     open_log(settings, clock)
     try:
         return _run(con, settings, clock, faults)
+    except Exception:
+        log.exception("run failed")  # the reason and the full traceback, before the log closes
+        raise
     finally:  # a crash still releases the database and the log file
         con.close()
         close_log()
@@ -829,17 +835,28 @@ def _run(
     return manifest
 
 
-def main() -> None:
+def main() -> int:
     """Run (or resume) the pipeline with settings from the environment, and print the totals.
 
-    The run itself reports to pipeline.log; the totals are printed for the person who ran it.
+    The run itself reports to pipeline.log; the totals are printed for the person who ran it. A
+    failed run is logged there with its full traceback, and the program ends with exit code 1, so
+    whatever started it (a person, tmux, a scheduler, CI) can tell that it failed.
+
+    Returns:
+        The exit code: 0 if the run finished, 1 if it failed.
     """
-    settings = Settings()
-    manifest = run(settings)
+    try:
+        settings = Settings()
+        manifest = run(settings)
+    except Exception as error:  # the top of the program: the one place a broad catch belongs
+        print(f"The run failed: {type(error).__name__}: {error}", file=sys.stderr)
+        print("The full traceback is in pipeline.log (if the run got that far).", file=sys.stderr)
+        return 1
     for stage, count in manifest["counts"].items():
         print(f"{stage:24} {count:>10,}")
     print("data sha256:", manifest["data_sha256"])
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

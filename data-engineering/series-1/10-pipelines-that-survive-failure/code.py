@@ -24,6 +24,7 @@ import os
 import random
 import sqlite3
 import time
+import traceback
 from collections.abc import Callable
 from contextlib import closing
 from pathlib import Path
@@ -65,6 +66,91 @@ CRASH_AFTER_ROWS = 4_000  # the row at which the CSV export is made to crash
 
 RDLogger.DisableLog("rdApp.*")  # bad molecules are reported in a table, not as RDKit messages
 WORK.mkdir(exist_ok=True)
+
+# ---- Errors in Python: exceptions and tracebacks ----
+def heavy_atoms(smiles: str) -> int:
+    """Count a molecule's heavy atoms (the atoms other than hydrogen)."""
+    mol = Chem.MolFromSmiles(smiles)
+    return mol.GetNumHeavyAtoms()
+
+
+try:
+    heavy_atoms("c1ccccc")  # a ring that never closes
+except AttributeError:
+    print(traceback.format_exc())
+
+# ---- Catching only what you expect: try, except, else, finally ----
+looked_at = []
+
+
+def parse_price(text: str) -> float | None:
+    """A price in dollars from a supplier's text, or None (with a warning) if it is not a number."""
+    try:
+        price = float(text)
+    except ValueError:  # only this: "twelve" or "" is not a number
+        log.warning("not a price: %r", text)
+        return None
+    else:  # only when float() worked
+        return round(price, 2)
+    finally:  # always, whichever way the function ends
+        looked_at.append(text)
+
+
+print([parse_price(t) for t in ["12.50", "twelve", "", "7"]])
+print("looked at:", looked_at)
+
+# ---- Mistakes that hide errors ----
+def total_hiding_errors(prices: list[float]) -> float:
+    """Add up prices, swallowing every error (do not write code like this)."""
+    total = 0.0
+    for price in prices:
+        try:
+            total += pirce  # noqa: F821 (a typo, kept on purpose)
+        except Exception:
+            pass  # every error is thrown away, the typo included
+    return total
+
+
+print("total:", total_hiding_errors([12.5, 30.0, 7.25]))
+
+# ---- An error log with the full traceback ----
+errors_log = WORK / "errors.log"
+to_errors = logging.FileHandler(errors_log, mode="w", encoding="utf-8")
+to_errors.setLevel(logging.ERROR)  # errors (and worse) only
+to_errors.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
+log.addHandler(to_errors)
+
+log.warning("batch 3: 2 records quarantined")  # on the screen only
+try:
+    heavy_atoms("c1ccccc")
+except AttributeError:
+    log.exception("could not count the atoms of record ML-00000007")
+
+log.removeHandler(to_errors)
+to_errors.close()
+lines = errors_log.read_text(encoding="utf-8").splitlines()
+print(f"errors.log: {len(lines)} lines; first: {lines[0]!r}; last: {lines[-1]!r}")
+
+# ---- When the whole job fails: the exit code ----
+def run_job() -> None:
+    """A stand-in for a whole pipeline run, which fails half way."""
+    log.info("job started")
+    heavy_atoms("c1ccccc")
+
+
+def main() -> int:
+    """Run the job; return the exit code: 0 if it worked, 1 if it failed (with the reason logged)."""
+    try:
+        run_job()
+    except Exception:  # the top of the job: the one place a broad catch belongs
+        log.exception("job failed")
+        return 1
+    log.info("job finished")
+    return 0
+
+
+print("exit code:", main())
+# a script would end with:  raise SystemExit(main())
 
 # ---- 2. Settings checked before a run starts ----
 class RunSettings(BaseSettings):

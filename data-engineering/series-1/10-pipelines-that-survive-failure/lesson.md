@@ -21,6 +21,10 @@ gives exactly the same tables as a run that never crashed.
 
 By the end of this module you will be able to:
 
+- read a traceback, catch only the errors you expect with `try`/`except`/`else`/`finally`, and
+  avoid the habits that hide errors;
+- log an error with its full traceback to an error log, and end a failed job with an exit code
+  that says it failed;
 - check a run's settings (batch size, output folder and so on) before any work starts, so a typing
   mistake stops the run in the first second;
 - tell failures that go away if you wait (try again) from failures that never go away (set the
@@ -71,6 +75,7 @@ import os
 import random
 import sqlite3
 import time
+import traceback
 from collections.abc import Callable
 from contextlib import closing
 from pathlib import Path
@@ -134,6 +139,222 @@ crashes at batch 7 and the second run picks up from there, without redoing batch
 without duplicating batch 7.
 
 ![Two runs over thirteen batches. The first run completes and checkpoints batches 0 to 6, saves the rows of batch 7 and crashes before checkpointing it. The second run skips batches 0 to 6, runs batch 7 again and finishes batches 8 to 12; the final tables equal those of a run that never crashed](figures/crash-resume.svg)
+
+### Errors in Python: exceptions and tracebacks
+
+Before building any of this, it helps to know what Python does when something goes wrong, because
+every technique in this module is a way of handling it. When a line of code cannot do its job,
+Python stops and **raises an exception**: an object that says what went wrong. If nothing catches
+it, the program ends and prints a **traceback**, the list of calls that led to the error.
+
+Here is a small function that counts the heavy atoms of a molecule, given a SMILES with a ring that
+never closes. RDKit cannot read it and returns `None` (nothing), and the function then asks `None`
+for its atoms. `try:` runs the code, and `except AttributeError as error:` catches that kind of
+exception, so we can look at it instead of the program ending; `traceback.format_exc()` gives the
+traceback as text, exactly as Python would have printed it:
+
+```python
+def heavy_atoms(smiles: str) -> int:
+    """Count a molecule's heavy atoms (the atoms other than hydrogen)."""
+    mol = Chem.MolFromSmiles(smiles)
+    return mol.GetNumHeavyAtoms()
+
+
+try:
+    heavy_atoms("c1ccccc")  # a ring that never closes
+except AttributeError:
+    print(traceback.format_exc())
+```
+```output
+Traceback (most recent call last):
+  File "10-pipelines-that-survive-failure/lesson.md block 2", line 8, in <module>
+  File "10-pipelines-that-survive-failure/lesson.md block 2", line 4, in heavy_atoms
+AttributeError: 'NoneType' object has no attribute 'GetNumHeavyAtoms'
+
+```
+
+**Read a traceback from the bottom up.** The last line names the exception and its message:
+`AttributeError`, because `None` has no `GetNumHeavyAtoms`. The lines above it say where: the line
+in `heavy_atoms` that asked for the atoms, which was called from the line above it. (Here the file
+names are the lesson's code blocks. In a script or a notebook they are its file or cell, with line
+numbers, and under each location Python also prints that line of code.) The
+bottom line says *what* failed, but not always *why*: the real cause is one step earlier, where
+RDKit returned `None` for a SMILES it could not read. So after reading the last line, look at the
+values that reached it. [Module 3](../03-files-and-identity/) checks for `None` straight after
+reading, which is the fix.
+
+### Catching only what you expect: try, except, else, finally
+
+A `try` statement has up to four parts:
+
+- `try:` the code that might fail;
+- `except SomeError:` what to do if *that kind* of error happens (you can have several);
+- `else:` what to do if nothing went wrong (optional);
+- `finally:` what to do in every case, error or not, such as closing a file (optional).
+
+Name the exception you expect, such as `ValueError` for text that is not a number. Then an error
+you did not expect still stops the program and shows its traceback, instead of being mistaken for
+the one you planned for. Here a supplier's price column is read, keeping a note of every value
+looked at:
+
+```python
+looked_at = []
+
+
+def parse_price(text: str) -> float | None:
+    """A price in dollars from a supplier's text, or None (with a warning) if it is not a number."""
+    try:
+        price = float(text)
+    except ValueError:  # only this: "twelve" or "" is not a number
+        log.warning("not a price: %r", text)
+        return None
+    else:  # only when float() worked
+        return round(price, 2)
+    finally:  # always, whichever way the function ends
+        looked_at.append(text)
+
+
+print([parse_price(t) for t in ["12.50", "twelve", "", "7"]])
+print("looked at:", looked_at)
+```
+```output
+WARNING not a price: 'twelve'
+WARNING not a price: ''
+[12.5, None, None, 7.0]
+looked at: ['12.50', 'twelve', '', '7']
+```
+
+`%r` in the log message shows the value with its quotes, so an empty text appears as `''` rather
+than as nothing.
+
+### Mistakes that hide errors
+
+The most harmful habit in error handling is catching *every* exception and carrying on. Here a
+function adds up prices, but its author made a typo, `pirce` for `price`, and wrapped the loop in
+a catch-all `except Exception: pass` "to be safe":
+
+```python
+def total_hiding_errors(prices: list[float]) -> float:
+    """Add up prices, swallowing every error (do not write code like this)."""
+    total = 0.0
+    for price in prices:
+        try:
+            total += pirce  # noqa: F821 (a typo, kept on purpose)
+        except Exception:
+            pass  # every error is thrown away, the typo included
+    return total
+
+
+print("total:", total_hiding_errors([12.5, 30.0, 7.25]))
+```
+```output
+total: 0.0
+```
+
+The answer is 0.0, and nothing says that anything went wrong: the typo raised a `NameError` three
+times, and each was thrown away. In a pipeline this is how a whole column turns into zeros without
+anyone noticing. The rules that prevent it:
+
+- catch the exception you expect (`except ValueError:`), never everything (`except:` on its own,
+  or `except Exception:` followed by `pass`);
+- if you do catch something broad (at the very top of a job, see below), **log it with its
+  traceback** and stop, or set the record aside with the reason, as the quarantine of section 3
+  does: never silently carry on;
+- keep the `try:` block short, around only the line that can fail in the expected way.
+
+### An error log with the full traceback
+
+When a job runs unattended, a traceback printed to a screen nobody watches is lost. Two habits
+keep it:
+
+- `log.exception("message")`, used inside an `except` block, logs the message at ERROR level
+  **with the full traceback**, so the log says exactly where and why;
+- a second log handler that writes only ERROR lines, and worse, to their own file,
+  `errors.log`, so the problems of a long run are in one short file instead of buried among
+  thousands of progress lines.
+
+Here the job's errors go to `work/errors.log`. `handler.setLevel(logging.ERROR)` makes this
+handler ignore everything less serious, so the warning below reaches the screen but not the file:
+
+```python
+errors_log = WORK / "errors.log"
+to_errors = logging.FileHandler(errors_log, mode="w", encoding="utf-8")
+to_errors.setLevel(logging.ERROR)  # errors (and worse) only
+to_errors.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
+log.addHandler(to_errors)
+
+log.warning("batch 3: 2 records quarantined")  # on the screen only
+try:
+    heavy_atoms("c1ccccc")
+except AttributeError:
+    log.exception("could not count the atoms of record ML-00000007")
+
+log.removeHandler(to_errors)
+to_errors.close()
+lines = errors_log.read_text(encoding="utf-8").splitlines()
+print(f"errors.log: {len(lines)} lines; first: {lines[0]!r}; last: {lines[-1]!r}")
+```
+```output
+WARNING batch 3: 2 records quarantined
+ERROR could not count the atoms of record ML-00000007
+Traceback (most recent call last):
+  File "10-pipelines-that-survive-failure/lesson.md block 8", line 9, in <module>
+  File "10-pipelines-that-survive-failure/lesson.md block 2", line 4, in heavy_atoms
+AttributeError: 'NoneType' object has no attribute 'GetNumHeavyAtoms'
+errors.log: 5 lines; first: 'ERROR could not count the atoms of record ML-00000007'; last: "AttributeError: 'NoneType' object has no attribute 'GetNumHeavyAtoms'"
+```
+
+The screen shows both lines, the error with its traceback underneath. `errors.log` holds only the
+error, with its traceback: the first line is the message and the last is the exception. A real job
+adds the time to every line (`%(asctime)s` in the format), so each error can be matched with what
+else was happening.
+
+### When the whole job fails: the exit code
+
+Every program ends with an **exit code**, a number it hands back to whatever started it: `0` means
+it worked, anything else means it failed. tmux, a scheduler (Module 15), a continuous-integration
+service and a script that runs several steps all look at that number to decide what to do next. A
+job that catches its own failure and then ends normally reports `0`, and is treated as a success.
+
+So a pipeline's script ends with the pattern below: its `main()` function runs the job; at the very
+top, and only there, it catches any exception, logs it with its traceback, and returns `1`;
+`raise SystemExit(main())` makes that number the program's exit code. (In this lesson we only call
+`main()` and print what it returns, because ending the lesson's own program would stop the lesson.)
+
+```python
+def run_job() -> None:
+    """A stand-in for a whole pipeline run, which fails half way."""
+    log.info("job started")
+    heavy_atoms("c1ccccc")
+
+
+def main() -> int:
+    """Run the job; return the exit code: 0 if it worked, 1 if it failed (with the reason logged)."""
+    try:
+        run_job()
+    except Exception:  # the top of the job: the one place a broad catch belongs
+        log.exception("job failed")
+        return 1
+    log.info("job finished")
+    return 0
+
+
+print("exit code:", main())
+# a script would end with:  raise SystemExit(main())
+```
+```output
+INFO job started
+ERROR job failed
+Traceback (most recent call last):
+  File "10-pipelines-that-survive-failure/lesson.md block 10", line 10, in main
+  File "10-pipelines-that-survive-failure/lesson.md block 10", line 4, in run_job
+  File "10-pipelines-that-survive-failure/lesson.md block 2", line 4, in heavy_atoms
+AttributeError: 'NoneType' object has no attribute 'GetNumHeavyAtoms'
+exit code: 1
+```
+
+[Module 15](../15-capstone/)'s pipeline ends exactly this way: a failed run is logged in its
+`pipeline.log` with the full traceback, and the program ends with exit code 1.
 
 ## 2. Settings checked before a run starts
 
