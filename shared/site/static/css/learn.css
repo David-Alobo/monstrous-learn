@@ -259,3 +259,29 @@ a.course:hover { border-color: var(--violet); transform: translateY(-2px); }
 .homework { margin-top: 2.5rem; padding: 1.2rem 1.5rem; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; }
 .homework h2 { margin-top: 0; }
 .note { color: var(--ink-2); font-size: 0.92rem; margin: 0 0 0.4rem; }
+
+/* the waitlist page and its form */
+.waitlist-split { align-items: start; }
+@media (min-width: 901px) { .waitlist-split { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); } }
+.waitlist-split h3 { margin-top: 1.6rem; }
+.waitlist-split .steps { padding-left: 1.2rem; display: grid; gap: 0.5rem; }
+.waitlist.panel { display: grid; gap: 1rem; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 1.4rem 1.5rem; }
+.waitlist h2 { margin: 0; }
+.waitlist .field { display: grid; gap: 0.35rem; border: 0; margin: 0; padding: 0; min-width: 0; }
+.waitlist .field > span, .waitlist legend { font-weight: 600; color: var(--ink); padding: 0; margin-bottom: 0.25rem; }
+.waitlist input:not([type=checkbox]):not([type=radio]), .waitlist select, .waitlist textarea { width: 100%; box-sizing: border-box; font: inherit; color: var(--ink); background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 0.65rem 0.75rem; }
+.waitlist input:focus, .waitlist select:focus, .waitlist textarea:focus { outline: none; border-color: var(--violet); box-shadow: 0 0 0 3px rgb(139 92 246 / 0.25); }
+.waitlist [aria-invalid=true] { border-color: #f87171 !important; }
+.waitlist .check { display: flex; gap: 0.55rem; align-items: flex-start; color: var(--ink-2); line-height: 1.45; }
+.waitlist .check input { margin-top: 0.25rem; accent-color: var(--violet); }
+.waitlist fieldset.field { display: grid; gap: 0.45rem; }
+.waitlist .optional { margin: 0.4rem 0 -0.3rem; color: var(--ink-2); font-size: 0.92rem; border-top: 1px solid var(--line); padding-top: 0.9rem; }
+.waitlist .consent { font-size: 0.92rem; }
+.waitlist button { justify-self: start; border: 0; cursor: pointer; font: inherit; font-weight: 600; }
+.waitlist button:disabled { opacity: 0.6; cursor: default; }
+.waitlist .trap { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+.form-status:empty { display: none; }
+.form-status { border-radius: 10px; padding: 0.8rem 1rem; line-height: 1.5; }
+.form-status.done { background: rgb(34 211 238 / 0.08); border: 1px solid rgb(34 211 238 / 0.4); color: var(--ink); }
+.form-status.error { background: rgb(248 113 113 / 0.08); border: 1px solid rgb(248 113 113 / 0.5); color: var(--ink); }
+.form-status.note { background: var(--panel-2); border: 1px solid var(--line); color: var(--ink-2); }

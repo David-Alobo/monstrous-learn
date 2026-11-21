@@ -44,6 +44,7 @@ def test_one_page_per_track_and_course_and_a_home(site):
         if (folder := lessons.folder(s["folder"], m["number"]))
     }
     want |= {out / "learn/start/index.html", out / "learn/databases/index.html"}  # the guides
+    want.add(out / "learn/waitlist/index.html")
     assert set(pages) == want
 
 
@@ -142,3 +143,18 @@ def test_big_picture_on_its_course_page_and_lesson_pages(site):
         assert 'id="big-picture"' in page and "assets/js/journey.js?v=" in page
         for lesson in sorted((out / f"learn/{t['slug']}/{s['slug']}").glob("*/index.html")):
             assert 'class="fits"' in lesson.read_text(encoding="utf-8"), lesson
+
+
+def test_waitlist_form_asks_what_it_should(site):
+    """The waitlist page has the required questions, the optional ones, consent and a spam trap,
+    and every waitlist button on the site points to it."""
+    out, _ = site
+    page = (out / "learn/waitlist/index.html").read_text(encoding="utf-8")
+    for name in ("first_name", "email", "courses", "country", "role", "position", "field_of_study",
+                 "python_level", "heard_from", "goals", "consent", "website"):  # fmt: skip
+        assert f'name="{name}"' in page, name
+    assert "privacy-policy" in page and 'list="countries"' in page
+    home = (out / "learn/index.html").read_text(encoding="utf-8")
+    assert (
+        'href="/learn/waitlist/"' in home and "mailto:contact@monstrous.com.ng?subject" not in home
+    )

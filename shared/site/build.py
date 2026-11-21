@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import shutil
 import sys
 import zipfile
@@ -66,7 +67,22 @@ START = HERE / "start.md"  # the "Start here" page
 DOCKER_GUIDE = HERE.parent / "docker" / "README.md"  # the database guide, also a page
 STATIC = HERE / "static"
 DIST = Path("dist")
-WAITLIST = "mailto:contact@monstrous.com.ng?subject=Waitlist%3A%20Learn%20with%20Monstrous%20Data"
+# the waitlist form, a page of this site (/learn/waitlist/): it sends each sign-up to FluentCRM on
+# monstrous.com.ng, which keeps the list and emails people to confirm their address
+WAITLIST = "/learn/waitlist/"
+# where the form sends sign-ups: the Monstrous Waitlist plugin on the same site (WordPress), which
+# adds them to FluentCRM; WAITLIST_ENDPOINT in the environment or .env overrides it (for testing)
+WAITLIST_ENDPOINT = "/wp-json/monstrous/v1/waitlist"
+COUNTRIES = HERE / "countries.json"  # every country's English name, for the form's country list
+# the waitlist's questions with a fixed list of answers; FluentCRM stores the answer as written here
+COURSE_CHOICES = ["Data Engineering, Series 1", "MLOps for Chemists", "Agentic AI in Chemistry"]
+ROLES = ["Undergraduate student", "MSc student", "PhD student", "Postdoctoral researcher",
+         "Academic staff", "Scientist in industry", "Data professional", "Other"]  # fmt: skip
+FIELDS_OF_STUDY = ["Chemistry", "Biochemistry", "Pharmacy or pharmacology", "Materials science",
+                   "Chemical engineering", "Other"]  # fmt: skip
+PYTHON_LEVELS = ["None yet", "A little", "Comfortable"]
+HEARD_FROM = ["LinkedIn", "Facebook", "A colleague or friend", "A search engine", "Other"]
+GOALS_MAX = 300  # characters; the same limit as waitlist.js
 ICONS = {
     "read": '<path d="M4 5a2 2 0 012-2h12v16H6a2 2 0 00-2 2zM4 21V5M8 7h6M8 11h6"/>',
     "run": '<path d="M4 4h16v12H4zM8 20h8M12 16v4M8 9l2 2-2 2M12 13h4"/>',
@@ -789,6 +805,134 @@ def guide(cat: dict, title: str, summary: str, html: str, toc: list) -> str:
 """
 
 
+def setting(name: str) -> str:
+    """A setting of the site build: from the environment, or else from the .env file it runs beside.
+
+    Used to point the waitlist form at a test receiver while developing.
+
+    Args:
+        name: The setting's name, e.g. WAITLIST_ENDPOINT.
+
+    Returns:
+        Its value, or "" if it is not set.
+    """
+    if os.environ.get(name):
+        return os.environ[name]
+    env = Path(".env")
+    if env.exists():
+        for line in env.read_text(encoding="utf-8").splitlines():
+            key, _, value = line.partition("=")
+            if key.strip() == name:
+                return value.strip().strip('"').strip("'")
+    return ""
+
+
+def choices(name: str, options: list[str], label: str) -> str:
+    """A drop-down list for an optional question, starting with "Choose".
+
+    Args:
+        name: The field's name (the FluentCRM field it fills).
+        options: The answers offered.
+        label: The question.
+
+    Returns:
+        The labelled list's HTML.
+    """
+    items = "".join(f'<option value="{escape(o)}">{escape(o)}</option>' for o in options)
+    return (f'<label class="field"><span>{escape(label)}</span><select name="{name}">'
+            f'<option value="">Choose (optional)</option>{items}</select></label>')  # fmt: skip
+
+
+def waitlist_page(cat: dict, endpoint: str) -> str:
+    """The waitlist page: what joining means, why we ask, and the form.
+
+    Args:
+        cat: The catalogue.
+        endpoint: The address the form sends sign-ups to (the Monstrous Waitlist plugin); "" makes
+            the form say sign-ups open soon.
+
+    Returns:
+        The page body.
+    """
+    base = cat["base"]
+    countries = json.loads(COUNTRIES.read_text(encoding="utf-8"))
+    country_list = "".join(f'<option value="{escape(c)}"></option>' for c in countries)
+    courses = "".join(
+        f'<label class="check"><input type="checkbox" name="courses" value="{escape(c)}"'
+        f"{' checked' if k == 0 else ''}> {escape(c)}</label>"
+        for k, c in enumerate(COURSE_CHOICES)
+    )
+    levels = "".join(
+        f'<label class="check"><input type="radio" name="python_level" value="{escape(v)}">'
+        f" {escape(v)}</label>"
+        for v in PYTHON_LEVELS
+    )
+    return f"""    <section class="wrap hero lesson-hero">
+      <p class="crumbs"><a href="{base}">All courses</a> / Join the waitlist</p>
+      <h1>Join the course waitlist</h1>
+      <p class="lede">Free courses in data engineering for chemists. Join the waitlist and we will
+        email you when a course you choose opens.</p>
+    </section>
+
+    <section class="wrap">
+      <div class="split waitlist-split">
+        <div>
+          <h2>What joining means</h2>
+          <ol class="steps">
+            <li>We email you when a course you chose opens. The first, Data Engineering for
+              Cheminformatics, starts in {escape(cat["opens"])}.</li>
+            <li>Occasional course news, and nothing else. Every email has a link to
+              unsubscribe.</li>
+            <li>You confirm your email first, so nobody can sign you up but you.</li>
+          </ol>
+          <h3>Why we ask the other questions</h3>
+          <p>They are all optional. They help us plan the course for the people who take it: cohort
+            times across time zones, examples from your field, and how much Python to assume. We
+            look only at totals, never at one person's answers, and never share them. Our
+            <a href="https://monstrous.com.ng/privacy-policy/">privacy policy</a> says how we look
+            after them.</p>
+          <p>The first course's lessons are already open to read.
+            <a href="{base}start/">Start here</a>.</p>
+        </div>
+        <form class="waitlist panel" data-endpoint="{escape(endpoint)}" novalidate>
+          <h2>Join the waitlist</h2>
+          <label class="field"><span>First name</span>
+            <input name="first_name" autocomplete="given-name" maxlength="60" required></label>
+          <label class="field"><span>Email address</span>
+            <input name="email" type="email" autocomplete="email" required></label>
+          <fieldset class="field" name="courses">
+            <legend>Which courses would you like to hear about?</legend>
+            {courses}</fieldset>
+          <p class="optional">Optional, to help us plan the courses:</p>
+          <label class="field"><span>Country</span>
+            <input name="country" list="countries" autocomplete="country-name"
+              placeholder="Start typing, then choose"></label>
+          <datalist id="countries">{country_list}</datalist>
+          {choices("role", ROLES, "Which best describes you?")}
+          <label class="field"><span>Position or job title</span>
+            <input name="position" autocomplete="organization-title" maxlength="100"
+              placeholder="e.g. Research Scientist, Lab Manager"></label>
+          {choices("field_of_study", FIELDS_OF_STUDY, "Your field")}
+          <fieldset class="field"><legend>Your Python experience</legend>{levels}</fieldset>
+          {choices("heard_from", HEARD_FROM, "How did you hear about the course?")}
+          <label class="field"><span>What do you hope to do with it?</span>
+            <textarea name="goals" rows="3" maxlength="{GOALS_MAX}"
+              placeholder="A sentence or two"></textarea></label>
+          <div class="trap" aria-hidden="true"><label>Leave this empty
+            <input name="website" tabindex="-1" autocomplete="off"></label></div>
+          <label class="check consent"><input type="checkbox" name="consent" value="yes" required>
+            <span>I agree to Monstrous Data storing my answers to send me news of the courses I
+            chose. I can unsubscribe at any time with the link in every email. See the
+            <a href="https://monstrous.com.ng/privacy-policy/">privacy policy</a>.</span></label>
+          <button class="btn primary" type="submit">Join the waitlist</button>
+          <div class="form-status" role="status" aria-live="polite"></div>
+        </form>
+      </div>
+    </section>
+    <script type="module" src="{base}assets/js/waitlist.js"></script>
+"""
+
+
 def guide_pages(cat: dict, root: Path) -> dict[Path, str]:
     """The guides' pages: Start here (/learn/start/) and the database guide (/learn/databases/).
 
@@ -922,6 +1066,7 @@ def build(out: Path = DIST) -> list[Path]:
         (root / "assets/css/learn.css").read_bytes()
         + lessons.code_css().encode()
         + (root / "assets/js/journey.js").read_bytes()
+        + (root / "assets/js/waitlist.js").read_bytes()
     )
     stamp = hashlib.sha256(css).hexdigest()[:10]
     base = cat["base"]
@@ -983,6 +1128,12 @@ def build(out: Path = DIST) -> list[Path]:
                     f"{url(cat, t, s)}{src.name}/",
                 )
     pages.update(guide_pages(cat, root))
+    pages[root / "waitlist" / "index.html"] = frame(
+        cat, WAITLIST, "Join the waitlist · Learn · Monstrous Data",
+        "Free courses in data engineering for chemists. Join the waitlist to hear when a course "
+        "opens; the first starts in " + cat["opens"] + ".",
+        waitlist_page(cat, setting("WAITLIST_ENDPOINT") or WAITLIST_ENDPOINT), WAITLIST,
+    )  # fmt: skip
     for path, text in readmes(cat).items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8", newline="\n")
@@ -991,6 +1142,7 @@ def build(out: Path = DIST) -> list[Path]:
         html = html.replace("assets/css/learn.css", f"assets/css/learn.css?v={stamp}")
         html = html.replace("assets/css/code.css", f"assets/css/code.css?v={stamp}")
         html = html.replace("assets/js/journey.js", f"assets/js/journey.js?v={stamp}")
+        html = html.replace("assets/js/waitlist.js", f"assets/js/waitlist.js?v={stamp}")
         path.write_text(html, encoding="utf-8", newline="\n")
     return list(pages)
 

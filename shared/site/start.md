@@ -52,6 +52,11 @@ what a code cell prints appears right under it.
 3. Run the **first code cell**: move the mouse over it and click the round ▶ button at its left, or
    click inside the cell and press **Shift+Enter** (Shift+Enter also moves you to the next cell).
    This cell installs what the lesson needs; it takes a minute or two and prints a few lines.
+
+   ![Module 1 open in Google Colab, with three places marked: 1, the Sign in button at the top right; 2, the round run button at the left of the first code cell, which appears when the mouse is over the cell; 3, Run all in the toolbar]({base}assets/img/start/colab-first-cell.png)
+
+   In the picture: **1** is where you sign in; **2** runs one cell (it appears when the mouse is over the cell); **3**, **Run all**, runs every cell from the top, one after another, if you would rather read the results than step through.
+
 4. Colab may show **"Warning: This notebook was not authored by Google"**. That is Colab's standard
    notice for notebooks that come from GitHub, where this course's files are kept. Click
    **Run anyway**.
