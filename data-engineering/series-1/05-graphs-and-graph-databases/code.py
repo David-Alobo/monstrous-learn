@@ -19,6 +19,7 @@ _sys.path[:0] = [str(_HERE), str(_HERE.parent)]
 # ---- Setup ----
 import logging
 import os
+from pathlib import Path
 
 import duckdb
 import networkx as nx
@@ -28,6 +29,8 @@ from neo4j import GraphDatabase
 from neo4j.exceptions import ConstraintError
 from rdkit import Chem, RDLogger
 from rdkit.Chem import rdFMCS
+
+from drawing import grid_svg, scheme_svg
 
 # log lines: level and message only, so the lesson's outputs are the same on every run
 # (a real job would add "%(asctime)s" to the format)
@@ -86,8 +89,11 @@ TARGETS = [("CHEMBL221", "Cyclooxygenase-1", "PTGS1"), ("CHEMBL230", "Cyclooxyge
 INHIBITS = [("aspirin", "CHEMBL221"), ("aspirin", "CHEMBL230"), ("ibuprofen", "CHEMBL221"),
             ("ibuprofen", "CHEMBL230"), ("celecoxib", "CHEMBL230")]  # fmt: skip
 START = "phenol"  # the starting material of section 4's questions
+DRUG = "aspirin"  # the route drawn at the end of section 4
+WORK = Path("work")  # where the lesson saves its drawings (git-ignored)
 
 RDLogger.DisableLog("rdApp.*")  # RDKit warns about hydrogen gas ([HH]), which has no heavy atom
+WORK.mkdir(exist_ok=True)
 
 # ---- 1. Graph questions about one molecule ----
 def to_graph(mol: Chem.Mol) -> nx.Graph:
@@ -235,6 +241,35 @@ records, _, _ = driver.execute_query("""
     RETURN c.name AS compound, uses ORDER BY uses DESC, compound""")
 for record in records:
     print(f"{record['compound']:17} used in {record['uses']} reactions")
+
+# ---- Seeing the molecules ----
+# needs: neo4j
+records, _, _ = driver.execute_query("""
+    MATCH path = (start:Compound {name: $start})-[:REACTANT_OF|PRODUCES*]->(product:Compound)
+    RETURN product.name AS name, product.smiles AS smiles, min(length(path)) / 2 AS steps
+    ORDER BY steps, name""", start=START)
+grid = grid_svg([(r["smiles"], f"{r['name']} ({r['steps']} step{'s' if r['steps'] > 1 else ''})")
+                 for r in records])  # fmt: skip
+(WORK / "from-phenol.svg").write_text(grid, encoding="utf-8")
+print(f"drew {len(records)} molecules in work/from-phenol.svg")
+grid  # in a notebook, the last line of a cell is shown: here, the picture
+# needs: neo4j
+records, _, _ = driver.execute_query("""
+    MATCH route = (start:Compound {name: $start})-[:REACTANT_OF|PRODUCES*]->(drug:Compound {name: $drug})
+    RETURN [n IN nodes(route) | CASE WHEN n:Reaction
+        THEN {reaction: n.name, reactants: [(c:Compound)-[:REACTANT_OF]->(n) | c.name]}
+        ELSE {compound: n.name, smiles: n.smiles} END] AS steps
+    ORDER BY length(route) LIMIT 1""", start=START, drug=DRUG)
+steps = records[0]["steps"]
+for k, step in enumerate(steps):
+    if "reaction" in step:  # the other reactants: all of them except the compound we arrive with
+        step["with"] = sorted(set(step["reactants"]) - {steps[k - 1]["compound"]})
+        print(f"  --[{step['reaction']}, with {', '.join(step['with'])}]-->")
+    else:
+        print(step["compound"])
+scheme = scheme_svg(steps)
+(WORK / f"route-{DRUG}.svg").write_text(scheme, encoding="utf-8")
+scheme
 
 # ---- 5. A molecule inside a graph database ----
 # needs: neo4j
