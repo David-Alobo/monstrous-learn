@@ -165,13 +165,27 @@ section 6) and start again: both databases set their password only the first tim
 
 Neo4j comes with a web page for looking at the graph and typing queries.
 
-1. Open <http://localhost:7474> in any web browser on the same computer.
-2. The page shows a **Connect to Neo4j** form. Leave **Connect URL** as it is
-   (`neo4j://localhost:7687`) and **Authentication type** as **Username / Password**.
-3. Type `neo4j` as the **Username** and `learn-neo4j` as the **Password**, and click **Connect**.
-4. You are in: the page shows a box at the top where you type queries, with a `neo4j$` prompt.
-   Type `RETURN 1 AS ok` and press Ctrl+Enter (Cmd+Enter on a Mac), or click the blue triangle.
-   A small table appears with the column `ok` and the value `1`.
+1. Open <http://localhost:7474> in any web browser on the same computer (type it in the address
+   bar, where you would type a website's name).
+2. You see a form called **Connect to instance**. Leave **Protocol** (`neo4j://`) and
+   **Connection URL** (`localhost:7687`) as they are. **Database user** already says `neo4j`.
+   Click in **Password**, type `learn-neo4j`, and click **Connect**.
+
+   ![The "Connect to instance" form: Protocol neo4j://, Connection URL localhost:7687, Database user neo4j, an empty Password box and a Connect button](images/neo4j-connect.png)
+
+3. You are in. The top line shows the instance, the database and the user, with a green dot when
+   connected. On the first visit a purple box offers a tour ("Work in tabs"): click **Dismiss**.
+
+   ![Neo4j Browser after logging in: a green dot and "Instance: neo4j://localhost:7687" at the top, a $ line for typing queries with a Run button, welcome cards below, and a purple "Work in tabs" tour box with Dismiss and Next buttons](images/neo4j-logged-in.png)
+
+4. Click the line that starts with `$` near the top: this is where you type queries. Type
+   `RETURN 1 AS ok` and click **Run** (or press Ctrl+Enter; Cmd+Enter on a Mac). A result appears
+   underneath, as a table with the column `ok` and the value `1`:
+
+   ![The query RETURN 1 AS ok and its result: a table with one column, ok, and one row, 1](images/neo4j-first-query.png)
+
+   Each query you run adds its result on top of the earlier ones; the **×** on the right removes
+   one.
 
 Module 5 uses this page to draw molecules and their links as a graph.
 

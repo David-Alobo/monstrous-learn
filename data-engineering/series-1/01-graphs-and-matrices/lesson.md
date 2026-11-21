@@ -12,19 +12,30 @@ the most fundamental answer: a molecule is a graph.
 
 By the end of this module you will be able to:
 
-- read a molecule into RDKit and walk through its atoms and bonds;
-- build the same molecule as a NetworkX graph, with atom and bond properties;
-- write it as matrices: adjacency, bond orders and distances;
-- encode atom and bond properties as numbers: weights, one-hot features, bond tensors, edge lists;
-- compute on molecules with NumPy: degrees, neighbours, walks, message passing and pieces.
+- read a molecule into RDKit and go through its atoms and bonds;
+- build the same molecule as a graph (atoms joined by bonds) with NetworkX;
+- write it as tables of numbers (matrices) that say which atoms are bonded, and how far apart
+  atoms are;
+- turn what each atom and bond is (element, charge, bond type) into numbers a program can use;
+- answer simple questions about a molecule with arithmetic on those tables.
 
-Everything here runs in a browser notebook or on any laptop: you need Python, RDKit, NetworkX,
-NumPy and pandas.
+The lesson uses four Python packages (code other people wrote, which you load with `import`):
+
+- **RDKit**, the standard open-source toolkit for chemistry in Python: it reads molecules and
+  knows their atoms, bonds and properties;
+- **NetworkX**, for graphs: things (nodes) joined by links (edges);
+- **NumPy**, for arrays of numbers and fast arithmetic on them;
+- **pandas**, for tables with named rows and columns (used here to print matrices readably).
+
+You do not need to know any of them: each is introduced as it is used. Everything here runs in a
+browser notebook or on any laptop.
 
 ## Setup
 
-Everything this lesson needs is imported and set here, so the settings can be changed in one place.
-Pipeline steps report with `log`; `print` is kept for showing you results.
+Every lesson in the course starts with this block. It loads (imports) the packages the lesson uses,
+and sets the lesson's settings, written in CAPITALS, so they can be changed in one place. Run it
+first. It also sets up `log`, which later code uses to report what it did; you can ignore it for
+now: [the end of this lesson](#why-log-and-not-print) explains it.
 
 ```python
 import logging
@@ -46,58 +57,16 @@ ELEMENTS = ["C", "N", "O"]
 BOND_TYPES = ["SINGLE", "DOUBLE", "TRIPLE", "AROMATIC"]
 ```
 
-### Why log and not print
-
-A script that reads a vendor file could report its progress with `print`. Pipeline code uses the
-`logging` module instead, for four reasons:
-
-- **Every line has a level.** `DEBUG` for detail while you develop, `INFO` for what a job did,
-  `WARNING` for records it skipped, `ERROR` for failures. You choose how much to see by setting a
-  level, without editing the code: everything while developing, warnings only in a nightly job.
-- **Every line says where it came from.** Each logger has a name (usually the module it is in), and
-  a real job adds a timestamp to every line, so you can tell which step wrote what, and when.
-- **One line can go to many places.** Add handlers and the same line goes to the screen, a file
-  and a monitoring system at once. `print` only reaches the screen, and when a job runs unattended
-  overnight nobody is watching the screen.
-- **Libraries already log.** RDKit, requests and Dask report through logging (or can be made to:
-  Module 6 does it for RDKit, and shows how to turn its messages down or off), so your messages
-  sit alongside theirs and are controlled the same way.
-
-`print` stays useful for looking at results while you explore: a matrix, a table, a SMILES. The
-rule in this course: if a line would still be wanted when the code runs unattended as a job, it is a
-log line; if it is there to show you something, it is a print. Here are three lines at three
-levels. The level was set to `INFO` above, so the `DEBUG` line is not shown:
-
-```python
-log.debug("atom 4 of aspirin has %d neighbours", 3)
-log.info("read %d molecules from %s", 2_000, "vendor.sdf")
-log.warning("skipped record %d: %s", 153, "valence error on atom 0")
-```
-```output
-INFO read 2000 molecules from vendor.sdf
-WARNING skipped record 153: valence error on atom 0
-```
-
-Raise the level to `WARNING`, as a nightly job might, and only the warning is left. The code that
-logs has not changed:
-
-```python
-log.setLevel(logging.WARNING)
-log.info("read %d molecules from %s", 2_000, "vendor.sdf")
-log.warning("skipped record %d: %s", 153, "valence error on atom 0")
-log.setLevel(logging.INFO)  # back to the lesson's level
-```
-```output
-WARNING skipped record 153: valence error on atom 0
-```
-
-Module 14 builds on this to monitor whole pipelines.
-
 ## 1. A molecule is a graph
 
 To RDKit, a molecule is a graph: **atoms are nodes and bonds are edges**. Hydrogens are usually
 left implicit, so only the heavy atoms appear. Here is aspirin, with every atom numbered in the
-order RDKit reads it:
+order RDKit reads it.
+
+The code reads aspirin from **SMILES**, a way of writing a molecule as one line of text:
+`CC(=O)Oc1ccccc1C(=O)O` is aspirin, letters are atoms (lower case for aromatic ones), `=` is a
+double bond, brackets are branches and the two `1`s close the ring. Module 2 explains SMILES fully;
+here we only need RDKit to read it:
 
 ![Aspirin drawn by RDKit with every atom numbered](figures/aspirin-atoms.svg)
 
@@ -173,7 +142,7 @@ atoms = sorted(g)
 labels = [f"{g.nodes[i]['element']}{i}" for i in atoms]
 adjacency = nx.to_numpy_array(g, nodelist=atoms, weight=None, dtype=int)
 print(pd.DataFrame(adjacency, index=labels, columns=labels))
-print("symmetric:", bool((adjacency == adjacency.T).all()))
+print("symmetric:", bool((adjacency == adjacency.T).all()))  # .T flips rows and columns
 print("bonds per atom (row sums):", adjacency.sum(axis=1).tolist())
 print("same as RDKit's:", bool((adjacency == Chem.GetAdjacencyMatrix(acetic_acid)).all()))
 ```
@@ -324,7 +293,12 @@ same as RDKit's: True
 
 ### Graph operations with NumPy
 
-Once a molecule is a matrix, graph questions become arithmetic. With aspirin's adjacency matrix
+*This part is optional: it shows where the matrices lead (graph neural networks, fingerprints, salt
+detection). Skip to [Why log and not print](#why-log-and-not-print) if the maths is new: nothing
+later in the course depends on it.*
+
+Once a molecule is a matrix, graph questions become arithmetic. In Python, `A @ B` multiplies two
+matrices. With aspirin's adjacency matrix
 `A`, row sums give each atom's degree and the non-zero entries of a row are its neighbours. Squaring
 the matrix counts routes: `(A @ A)[i, j]` is the number of two-bond walks from atom `i` to atom `j`,
 and its diagonal gives the degrees back:
@@ -369,7 +343,9 @@ Atom 1, the acetyl carbon, receives one carbon and two oxygens from its neighbou
 two aromatic carbons and an oxygen.
 
 The **graph Laplacian**, `L = D - A` (the degrees on the diagonal minus the adjacency matrix), has
-one zero eigenvalue for every separate piece of a graph. A record of sodium acetate holds two pieces,
+one zero eigenvalue for every separate piece of a graph. (An eigenvalue is one of a set of numbers
+that summarise a square matrix; `np.linalg.eigvalsh` computes them. Here we only count how many are
+zero.) A record of sodium acetate holds two pieces,
 the acetate and the sodium ion, and the arithmetic finds both, a check Module 6 uses to spot salts
 and mixtures:
 
@@ -394,10 +370,59 @@ Matrices are convenient for computation but wasteful for storage: an adjacency m
 the square of the number of atoms, while a list of bonds grows only with the bonds. Store the
 molecule (or its bond list) and build matrices when an algorithm needs them.
 
+## Why log and not print
+
+Some code in this lesson, and much more in the later ones, reports with `log.info(...)` rather
+than `print(...)`. A script that reads a vendor file could report its progress with `print`. Pipeline code uses the
+`logging` module instead, for four reasons:
+
+- **Every line has a level.** `DEBUG` for detail while you develop, `INFO` for what a job did,
+  `WARNING` for records it skipped, `ERROR` for failures. You choose how much to see by setting a
+  level, without editing the code: everything while developing, warnings only in a nightly job.
+- **Every line says where it came from.** Each logger has a name (usually the module it is in), and
+  a real job adds a timestamp to every line, so you can tell which step wrote what, and when.
+- **One line can go to many places.** Add handlers and the same line goes to the screen, a file
+  and a monitoring system at once. `print` only reaches the screen, and when a job runs unattended
+  overnight nobody is watching the screen.
+- **Libraries already log.** RDKit, requests and Dask report through logging (or can be made to:
+  Module 6 does it for RDKit, and shows how to turn its messages down or off), so your messages
+  sit alongside theirs and are controlled the same way.
+
+`print` stays useful for looking at results while you explore: a matrix, a table, a SMILES. The
+rule in this course: if a line would still be wanted when the code runs unattended as a job, it is a
+log line; if it is there to show you something, it is a print. Here are three lines at three
+levels. The level was set to `INFO` above, so the `DEBUG` line is not shown:
+
+```python
+log.debug("atom 4 of aspirin has %d neighbours", 3)
+log.info("read %d molecules from %s", 2_000, "vendor.sdf")
+log.warning("skipped record %d: %s", 153, "valence error on atom 0")
+```
+```output
+INFO read 2000 molecules from vendor.sdf
+WARNING skipped record 153: valence error on atom 0
+```
+
+Raise the level to `WARNING`, as a nightly job might, and only the warning is left. The code that
+logs has not changed:
+
+```python
+log.setLevel(logging.WARNING)
+log.info("read %d molecules from %s", 2_000, "vendor.sdf")
+log.warning("skipped record %d: %s", 153, "valence error on atom 0")
+log.setLevel(logging.INFO)  # back to the lesson's level
+```
+```output
+WARNING skipped record 153: valence error on atom 0
+```
+
+Module 14 builds on this to monitor whole pipelines.
+
 ## Try it yourself
 
-The homework for this module is in `homework.md`: a few questions answered by running code like the
-code above. Answers are published after the cohort's deadline.
+The homework is a few questions, answered by running code like the code above: in a new cell at
+the end of the notebook, or in a script. It is at the end of the lesson's page, and in
+`homework.md` in the module's folder. The answers are published after the cohort's deadline.
 
 ## Further reading
 

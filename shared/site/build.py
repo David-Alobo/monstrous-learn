@@ -62,6 +62,8 @@ HERE = Path(__file__).parent
 CATALOGUE = HERE / "catalogue.json"
 FRAME = HERE / "templates" / "frame.html"
 JOURNEY = HERE / "journey.json"
+START = HERE / "start.md"  # the "Start here" page
+DOCKER_GUIDE = HERE.parent / "docker" / "README.md"  # the database guide, also a page
 STATIC = HERE / "static"
 DIST = Path("dist")
 WAITLIST = "mailto:contact@monstrous.com.ng?subject=Waitlist%3A%20Learn%20with%20Monstrous%20Data"
@@ -449,15 +451,18 @@ def home(cat: dict) -> str:
     return f"""    <section class="wrap hero">
       <p class="eyebrow">Monstrous Data · Learn</p>
       <h1>{escape(cat["title"])}</h1>
-      <p class="lede">Free, practical courses in data engineering and AI for chemists who know
-        some Python, with code you can run and every example tested before it is published.
-        We start with the data: databases, pipelines and checks you can trust. MLOps and
-        agentic AI follow, each built on the one before.</p>
+      <p class="lede">Free, practical courses for chemists who want to handle chemical data the
+        way software engineers do: reliably, at any size, and traceable to its source. That work
+        is called data engineering, and it is where we start; MLOps and agentic AI follow.</p>
+      <p>If you have run a few cells of Python in a notebook, you can start: every tool, from Git
+        to databases, is taught as you go, with code you can run on any device and every example
+        tested before it is published.</p>
       <div class="meta"><span class="chip">Free</span><span class="chip">Any device</span>
         <span class="chip status">First course: {escape(cat["opens"])}</span></div>
       <div class="actions">
         <a class="btn primary" href="{url(cat, first_track, first)}">
           Start with {escape(first_track["short"])}, Series {first["number"]}</a>
+        <a class="btn ghost" href="{cat["base"]}start/">New here? Start here</a>
         <a class="btn ghost" href="{WAITLIST}">Join the waitlist</a>
       </div>
     </section>
@@ -561,9 +566,10 @@ def course(cat: dict, i: int, k: int) -> str:
         if m.get("part") and m["part"] != part:
             part = m["part"]
             mods.append(f'        <li class="part">{escape(part)}</li>')
-        when = "Planned" if planned else (s["status"] if m["number"] == 1 else "To follow")
-        tools = "".join(f'<span class="chip">{escape(x)}</span>' for x in m["tools"])
         lesson = lessons.folder(s["folder"], m["number"])
+        # one status per module: written lessons can be read now, the others are still to come
+        when = "Planned" if planned else ("Open to read" if lesson else "To follow")
+        tools = "".join(f'<span class="chip">{escape(x)}</span>' for x in m["tools"])
         title = escape(m["title"])
         if lesson:
             title = f'<a href="{url(cat, t, s)}{lesson.name}/">{title}</a>'
@@ -595,8 +601,25 @@ def course(cat: dict, i: int, k: int) -> str:
     cadence = (
         "This course is planned: the outline may change. Join the waitlist to hear when it opens."
         if planned
-        else f"Module 1 opens in {escape(s['status'])}, then one a week: join the cohort or "
-        "follow at your own pace."
+        else f"The cohort starts in {escape(s['status'])}, with one module a week. The modules "
+        "already written are open now: you can start reading and running them today, on your own."
+    )
+    first = lessons.folder(s["folder"], 1)
+    start_box = (
+        ""
+        if planned or first is None
+        else f"""    <section class="wrap">
+      <div class="start-box">
+        <h2>Start here</h2>
+        <ol><li>Open <a href="{url(cat, t, s)}{first.name}/">Module 1</a> and read it on any
+          device.</li>
+          <li>To run its code, click <b>Open this lesson in Google Colab</b> in its Get set up box:
+          you need only a free Google account, nothing to install.</li>
+          <li>New to notebooks? <a href="{cat["base"]}start/">Start here</a> shows every step,
+          and what each word means.</li></ol>
+      </div>
+    </section>
+"""
     )
     return f"""    <section class="wrap hero">
       <p class="crumbs"><a href="{cat["base"]}">All courses</a> /
@@ -607,7 +630,7 @@ def course(cat: dict, i: int, k: int) -> str:
       <div class="meta">{status_chip(s)}<span class="chip">{len(s["modules"])} modules</span>
         <span class="chip">{escape(s["level"])}</span><span class="chip">Free</span></div>
     </section>
-{journey(cat, t, s)}
+{start_box}{journey(cat, t, s)}
     <section class="wrap">
       <div class="split">
         <div>
@@ -619,7 +642,11 @@ def course(cat: dict, i: int, k: int) -> str:
           </ol>
         </div>
         <aside class="aside">
-          <h3>What you will use</h3>
+          <h3>What you need</h3>
+          <ul><li>A web browser, on any device</li><li>A free Google account, to run the code
+            in Google Colab</li><li>A little Python: loops and functions</li></ul>
+          <h3>What you will learn to use</h3>
+          <p class="note">Each of these is taught in the course: none is needed to start.</p>
           <ul>{tools}</ul>
           <h3>How to follow</h3>
           <ul><li>In the browser, on any device: the full setup runs online</li><li>On your own
@@ -695,8 +722,11 @@ def lesson_page(
           <h3>In this lesson</h3>
           <ul class="contents">{contents}</ul>
           <h3>Practise</h3>
-          <ul><li>Homework: <code>homework.md</code> in the module's folder</li>
+          <ul><li><a href="#homework">Homework</a>, at the end of this page</li>
             <li>Ask in the Discord community</li></ul>
+          <h3>New here?</h3>
+          <ul><li><a href="{cat["base"]}start/">Start here</a>: how to run a lesson, and what
+            each word means</li></ul>
           <a class="btn primary" href="{WAITLIST}">Join the waitlist</a>
         </aside>
       </div>
@@ -704,6 +734,90 @@ def lesson_page(
         {neighbour(k - 1, True)}{neighbour(k + 1, False)}</nav>
     </section>
 """
+
+
+def homework_html(src: Path) -> str:
+    """A module's homework, shown at the end of its lesson page.
+
+    Args:
+        src: The module's folder, which may hold homework.md.
+
+    Returns:
+        The homework as an HTML section, or "" if the module has none.
+    """
+    path = src / "homework.md"
+    if not path.exists():
+        return ""
+    text = path.read_text(encoding="utf-8")
+    text = "\n".join(line for line in text.splitlines() if not line.startswith("# "))  # own title
+    body = lessons.markdown.markdown(text, extensions=["fenced_code", "tables", "sane_lists"])
+    return f'<section class="homework" id="homework"><h2>Homework</h2>{body}</section>'
+
+
+def guide(cat: dict, title: str, summary: str, html: str, toc: list) -> str:
+    """A guide's page (Start here, the database guide): its text and a contents panel.
+
+    Args:
+        cat: The catalogue.
+        title: The guide's title.
+        summary: Its one-line summary.
+        html: The guide as HTML.
+        toc: Its sections, as (anchor, heading).
+
+    Returns:
+        The page body.
+    """
+    contents = "".join(f'<li><a href="#{a}">{escape(h)}</a></li>' for a, h in toc)
+    return f"""    <section class="wrap hero lesson-hero">
+      <p class="crumbs"><a href="{cat["base"]}">All courses</a> / {escape(title)}</p>
+      <h1>{escape(title)}</h1>
+      <p class="lede">{escape(summary)}</p>
+    </section>
+
+    <section class="wrap">
+      <div class="split lesson-split">
+        <article class="lesson">
+{html}
+        </article>
+        <aside class="aside toc">
+          <h3>On this page</h3>
+          <ul class="contents">{contents}</ul>
+          <a class="btn primary" href="{WAITLIST}">Join the waitlist</a>
+        </aside>
+      </div>
+    </section>
+"""
+
+
+def guide_pages(cat: dict, root: Path) -> dict[Path, str]:
+    """The guides' pages: Start here (/learn/start/) and the database guide (/learn/databases/).
+
+    Args:
+        cat: The catalogue.
+        root: The site's folder (out/learn).
+
+    Returns:
+        Each page's path and HTML.
+    """
+    base = cat["base"]
+    pages = {}
+    meta, html, toc = lessons.render(START.read_text(encoding="utf-8").replace("{base}", base))
+    pages[root / "start" / "index.html"] = frame(
+        cat, f"{base}start/", "Start here · Learn · Monstrous Data", meta["summary"],
+        guide(cat, meta["title"], meta["summary"], html, toc), f"{base}start/",
+    )  # fmt: skip
+    text = DOCKER_GUIDE.read_text(encoding="utf-8")
+    title = text.splitlines()[0].lstrip("# ").strip()
+    text = "\n".join(text.splitlines()[1:])
+    summary = "Install Docker, start the courses' PostgreSQL and Neo4j databases, and log in."
+    _, html, toc = lessons.render(text)
+    if (DOCKER_GUIDE.parent / "images").is_dir():
+        shutil.copytree(DOCKER_GUIDE.parent / "images", root / "databases" / "images")
+    pages[root / "databases" / "index.html"] = frame(
+        cat, f"{base}databases/", "The databases, in Docker · Learn · Monstrous Data", summary,
+        guide(cat, title, summary, html, toc), f"{base}databases/",
+    )  # fmt: skip
+    return pages
 
 
 def readme(cat: dict, t: dict, s: dict) -> str:
@@ -856,6 +970,10 @@ def build(out: Path = DIST) -> list[Path]:
                     if (src / name).exists():
                         shutil.copy2(src / name, dest / name)
                 setup = setup_html(s["folder"], meta, src.name)
+                homework = homework_html(src)
+                if homework:
+                    html += homework
+                    toc = [*toc, ("homework", "Homework")]
                 pages[dest / "index.html"] = frame(
                     cat,
                     f"{url(cat, t, s)}{src.name}/",
@@ -864,6 +982,7 @@ def build(out: Path = DIST) -> list[Path]:
                     lesson_page(cat, t, s, m, html, toc, meta.get("summary", m["what"]), setup),
                     f"{url(cat, t, s)}{src.name}/",
                 )
+    pages.update(guide_pages(cat, root))
     for path, text in readmes(cat).items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8", newline="\n")

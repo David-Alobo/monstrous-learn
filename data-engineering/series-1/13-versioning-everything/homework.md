@@ -1,7 +1,9 @@
 # Homework: Versioning everything
 
-Answer each question by running code like the code in the lesson. Submit your answers through the
-cohort's form; the answers are published after the deadline.
+Answer each question by running code like the code in the lesson: add a new cell at the end of the
+lesson's notebook (in Colab, **+ Code**) and work there. If you are in a cohort, you will be told
+where to send your answers; everyone can check theirs against the answers published after the
+cohort's deadline.
 
 1. In a new repository under `work/`, commit a file `filters.py`, tag it `v0.1.0`, then make two
    more commits and tag the second `v0.2.0`. What does `git describe --tags` print after each

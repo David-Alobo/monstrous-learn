@@ -10,9 +10,16 @@ Write down what a table of activity data must contain, check single records at t
 
 ## Get set up
 
-**In the browser, on any device:** [open this lesson as a notebook in Google Colab](https://colab.research.google.com/github/David-Alobo/monstrous-learn/blob/main/data-engineering/series-1/12-validating-data/notebook.ipynb) and run the first cell, which installs everything it needs.
+You can read this page without running anything. To run the code yourself, the easiest way needs nothing installed, only a web browser and a free Google account:
 
-**On your own computer (Windows, macOS or Linux):** with [uv](https://docs.astral.sh/uv/) installed,
+1. [Open this lesson in Google Colab](https://colab.research.google.com/github/David-Alobo/monstrous-learn/blob/main/data-engineering/series-1/12-validating-data/notebook.ipynb). Colab is Google's free service for running Python notebooks in the browser; sign in with your Google account if asked.
+2. Run the cells in order, from the top: click the ▶ button at the left of a cell, or click inside it and press Shift+Enter. The first cell installs what the lesson needs and takes a minute or two.
+3. If Colab warns "This notebook was not authored by Google", click **Run anyway**: the notebook comes from this course's own repository.
+4. Under each cell you should see what the box labelled **Output** under the same code on the lesson's page shows (the notebook opens with our outputs already in place; running a cell replaces them with yours). Boxes labelled **Example output** show timings or memory, so your numbers will differ a little.
+
+New to notebooks, or want to run the lessons on your own computer instead (with Jupyter, Anaconda or a terminal)? [Start here](https://monstrous.com.ng/learn/start/) shows every step.
+
+If you already work in a terminal, the short version, with [uv](https://docs.astral.sh/uv/) and Git installed:
 
 ```bash
 git clone https://github.com/David-Alobo/monstrous-learn.git
@@ -21,8 +28,6 @@ uv sync
 uv run python 12-validating-data/code.py
 ```
 
-or with pip only, in any Python 3.11+ environment: `python -m pip install rdkit pydantic pandera pandas numpy duckdb`.
-
-*On Windows*, clone into a short folder (for example `C:\code`): Windows limits paths to 260 characters unless [long paths are enabled](https://learn.microsoft.com/windows/win32/fileio/maximum-file-path-limitation), and some packages install deep inside the environment.
+or, in any Python 3.11+ environment: `python -m pip install rdkit pydantic pandera pandas numpy duckdb`.
 
 *This README, the notebook and `code.py` are made from `lesson.md` by `lessonkit.py --export`; edit the lesson, not them.*

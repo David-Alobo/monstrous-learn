@@ -44,6 +44,8 @@ REPO = "David-Alobo/monstrous-learn"
 SITE = "https://monstrous.com.ng/learn/data-engineering/series-1"
 SERIES_PATH = "data-engineering/series-1"
 RAW = f"https://raw.githubusercontent.com/{REPO}/main/{SERIES_PATH}"
+START = "https://monstrous.com.ng/learn/start/"  # the course's "Start here" page
+DOCKER_GUIDE = "https://monstrous.com.ng/learn/databases/"  # the database guide, as a page
 
 
 def front_matter(text: str) -> tuple[dict[str, str], str]:
@@ -229,12 +231,26 @@ def setup_lines(meta: dict[str, str], folder: str) -> list[str]:
     lines = [
         "## Get set up",
         "",
-        "**In the browser, on any device:** [open this lesson as a notebook in Google Colab]"
-        f"({colab})"
-        " and run the first cell, which installs everything it needs.",
+        "You can read this page without running anything. To run the code yourself, the easiest"
+        " way needs nothing installed, only a web browser and a free Google account:",
         "",
-        "**On your own computer (Windows, macOS or Linux):** with"
-        " [uv](https://docs.astral.sh/uv/) installed,",
+        f"1. [Open this lesson in Google Colab]({colab}). Colab is Google's free service for"
+        " running Python notebooks in the browser; sign in with your Google account if asked.",
+        "2. Run the cells in order, from the top: click the ▶ button at the left of a cell, or"
+        " click inside it and press Shift+Enter. The first cell installs what the lesson needs"
+        " and takes a minute or two.",
+        '3. If Colab warns "This notebook was not authored by Google", click **Run anyway**: the'
+        " notebook comes from this course's own repository.",
+        "4. Under each cell you should see what the box labelled **Output** under the same code"
+        " on the lesson's page shows (the notebook opens with our outputs already in place;"
+        " running a cell replaces them with yours). Boxes labelled **Example output** show"
+        " timings or memory, so your numbers will differ a little.",
+        "",
+        f"New to notebooks, or want to run the lessons on your own computer instead (with"
+        f" Jupyter, Anaconda or a terminal)? [Start here]({START}) shows every step.",
+        "",
+        "If you already work in a terminal, the short version, with"
+        " [uv](https://docs.astral.sh/uv/) and Git installed:",
         "",
         "```bash",
         f"git clone https://github.com/{REPO}.git",
@@ -243,23 +259,16 @@ def setup_lines(meta: dict[str, str], folder: str) -> list[str]:
         f"uv run python {folder}/code.py",
         "```",
         "",
-        f"or with pip only, in any Python 3.11+ environment: `python -m pip install {pkgs}`.",
-        "",
-        "*On Windows*, clone into a short folder (for example `C:\code`): Windows limits paths to"
-        " 260 characters unless [long paths are enabled]"
-        "(https://learn.microsoft.com/windows/win32/fileio/maximum-file-path-limitation), and"
-        " some packages install deep inside the environment.",
+        f"or, in any Python 3.11+ environment: `python -m pip install {pkgs}`.",
     ]
     services = listed(meta, "services")
     if services:
         lines += [
             "",
-            f"**This lesson also needs {' and '.join(services)}**, which runs in Docker on any"
-            " computer (Docker Desktop on Windows and macOS). From the repository's root:",
-            "",
-            "```bash",
-            f"docker compose -f shared/docker/compose.yml up -d {' '.join(services)}",
-            "```",
+            f"**This lesson also needs {' and '.join(services)}**, a database that runs in Docker"
+            f" on your own computer (Colab cannot run it; the rest of the lesson runs there)."
+            f" [The database guide]({DOCKER_GUIDE}) shows how to install Docker and start it,"
+            " step by step.",
         ]
     return lines
 

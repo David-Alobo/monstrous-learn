@@ -1,7 +1,9 @@
 # Homework: Libraries larger than memory
 
-Answer each question by running code like the code in the lesson. Submit your answers through the
-cohort's form; the answers are published after the deadline.
+Answer each question by running code like the code in the lesson: add a new cell at the end of the
+lesson's notebook (in Colab, **+ Code**) and work there. If you are in a cohort, you will be told
+where to send your answers; everyone can check theirs against the answers published after the
+cohort's deadline.
 
 1. Make a sample with `chemlib.library(30_000, seed=21)` and write it to Parquet three times:
    with `compression="zstd"`, `"snappy"` and `"none"`. How many bytes per molecule does each file

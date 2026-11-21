@@ -357,8 +357,9 @@ else (fingerprints, descriptors, conformers) can be recalculated from it, as lon
 
 ## Try it yourself
 
-The homework for this module is in `homework.md`: a few questions answered by running code like the
-code above. Answers are published after the cohort's deadline.
+The homework is a few questions, answered by running code like the code above: in a new cell at
+the end of the notebook, or in a script. It is at the end of the lesson's page, and in
+`homework.md` in the module's folder. The answers are published after the cohort's deadline.
 
 ## Further reading
 

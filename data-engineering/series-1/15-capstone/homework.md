@@ -1,7 +1,9 @@
 # Homework: Capstone: a resumable, monitored pipeline over a large library
 
-Answer each question by running code like the code in the lesson. Submit your answers through the
-cohort's form; the answers are published after the deadline.
+Answer each question by running code like the code in the lesson: add a new cell at the end of the
+lesson's notebook (in Colab, **+ Code**) and work there. If you are in a cohort, you will be told
+where to send your answers; everyone can check theirs against the answers published after the
+cohort's deadline.
 
 1. Run `pipeline.run` on 6,000 molecules with `seed=27`, `defect_rate=0.05` and `batch_size=300`
    (into a new `out_dir`). How many batches are there, what are the counts at every stage, and do

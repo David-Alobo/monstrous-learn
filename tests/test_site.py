@@ -43,7 +43,22 @@ def test_one_page_per_track_and_course_and_a_home(site):
         for m in s["modules"]
         if (folder := lessons.folder(s["folder"], m["number"]))
     }
+    want |= {out / "learn/start/index.html", out / "learn/databases/index.html"}  # the guides
     assert set(pages) == want
+
+
+def test_guides_are_linked_and_show_their_pictures(site):
+    """Start here is linked from the home page and every course page, and the database guide's
+    screenshots are published next to it."""
+    out, _ = site
+    assert 'href="/learn/start/"' in (out / "learn/index.html").read_text(encoding="utf-8")
+    for _, s in SERIES:
+        if s["status"] != "Planned" and lessons.folder(s["folder"], 1):
+            page = next((out / "learn").glob(f"*/{s['slug']}/index.html"))
+            assert 'href="/learn/start/"' in page.read_text(encoding="utf-8")
+    guide = out / "learn/databases/index.html"
+    for src in re.findall(r'<img[^>]+src="(images/[^"]+)"', guide.read_text(encoding="utf-8")):
+        assert (guide.parent / src).exists(), src
 
 
 def test_every_internal_link_and_asset_exists(site):

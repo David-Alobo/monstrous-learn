@@ -35,15 +35,6 @@ ELEMENTS = ["C", "N", "O"]
 # RDKit's bond types, one layer of the bond tensor and one edge feature each (section 2)
 BOND_TYPES = ["SINGLE", "DOUBLE", "TRIPLE", "AROMATIC"]
 
-# ---- Why log and not print ----
-log.debug("atom 4 of aspirin has %d neighbours", 3)
-log.info("read %d molecules from %s", 2_000, "vendor.sdf")
-log.warning("skipped record %d: %s", 153, "valence error on atom 0")
-log.setLevel(logging.WARNING)
-log.info("read %d molecules from %s", 2_000, "vendor.sdf")
-log.warning("skipped record %d: %s", 153, "valence error on atom 0")
-log.setLevel(logging.INFO)  # back to the lesson's level
-
 # ---- 1. A molecule is a graph ----
 aspirin = Chem.MolFromSmiles("CC(=O)Oc1ccccc1C(=O)O")
 print(aspirin.GetNumAtoms(), "heavy atoms,", aspirin.GetNumBonds(), "bonds")
@@ -83,7 +74,7 @@ atoms = sorted(g)
 labels = [f"{g.nodes[i]['element']}{i}" for i in atoms]
 adjacency = nx.to_numpy_array(g, nodelist=atoms, weight=None, dtype=int)
 print(pd.DataFrame(adjacency, index=labels, columns=labels))
-print("symmetric:", bool((adjacency == adjacency.T).all()))
+print("symmetric:", bool((adjacency == adjacency.T).all()))  # .T flips rows and columns
 print("bonds per atom (row sums):", adjacency.sum(axis=1).tolist())
 print("same as RDKit's:", bool((adjacency == Chem.GetAdjacencyMatrix(acetic_acid)).all()))
 
@@ -147,3 +138,12 @@ print(
 print(
     "pieces:", int(np.isclose(eigenvalues, 0).sum()), " RDKit agrees:", len(Chem.GetMolFrags(salt))
 )
+
+# ---- Why log and not print ----
+log.debug("atom 4 of aspirin has %d neighbours", 3)
+log.info("read %d molecules from %s", 2_000, "vendor.sdf")
+log.warning("skipped record %d: %s", 153, "valence error on atom 0")
+log.setLevel(logging.WARNING)
+log.info("read %d molecules from %s", 2_000, "vendor.sdf")
+log.warning("skipped record %d: %s", 153, "valence error on atom 0")
+log.setLevel(logging.INFO)  # back to the lesson's level

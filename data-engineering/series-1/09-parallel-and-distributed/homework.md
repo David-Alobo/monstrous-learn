@@ -1,7 +1,9 @@
 # Homework: Parallel and distributed processing
 
-Answer each question by running code like the code in the lesson. Submit your answers through the
-cohort's form; the answers are published after the deadline.
+Answer each question by running code like the code in the lesson: add a new cell at the end of the
+lesson's notebook (in Colab, **+ Code**) and work there. If you are in a cohort, you will be told
+where to send your answers; everyone can check theirs against the answers published after the
+cohort's deadline.
 
 1. Make `chemlib.library(8_000, seed=31)` and run `workers.describe` over it serially and with
    joblib (`n_jobs=2`, chunks of 1,000). Are the results identical? What is the mean molecular

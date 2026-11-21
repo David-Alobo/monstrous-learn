@@ -250,3 +250,12 @@ a.course:hover { border-color: var(--violet); transform: translateY(-2px); }
 .jproblem p { margin: 0 0 0.6rem; }
 .jproblem .jtag { color: var(--violet); }
 .jproblem .jask { margin: 0; font: 600 1.08rem var(--heading); color: var(--ink); }
+
+/* the course page's "Start here" box, the homework at the end of a lesson, and short notes */
+.start-box { background: var(--panel); border: 1px solid var(--violet); border-radius: 16px; padding: 1.2rem 1.5rem; box-shadow: 0 0 0 4px rgb(139 92 246 / 0.12); }
+.start-box h2 { margin-top: 0; }
+.start-box ol { margin: 0; padding-left: 1.3rem; }
+.start-box li { margin: 0.35rem 0; }
+.homework { margin-top: 2.5rem; padding: 1.2rem 1.5rem; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; }
+.homework h2 { margin-top: 0; }
+.note { color: var(--ink-2); font-size: 0.92rem; margin: 0 0 0.4rem; }
