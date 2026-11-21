@@ -158,3 +158,12 @@ def test_waitlist_form_asks_what_it_should(site):
     assert (
         'href="/learn/waitlist/"' in home and "mailto:contact@monstrous.com.ng?subject" not in home
     )
+
+
+def test_every_page_has_a_way_back_to_the_top(site):
+    """Every page has the back-to-top link to the header (#top) and loads its script."""
+    _, pages = site
+    for page in pages:
+        html = page.read_text(encoding="utf-8")
+        assert 'class="to-top" href="#top"' in html and 'id="top"' in html, page
+        assert "assets/js/totop.js?v=" in html, page

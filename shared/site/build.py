@@ -1074,6 +1074,7 @@ def build(out: Path = DIST) -> list[Path]:
         + lessons.code_css().encode()
         + (root / "assets/js/journey.js").read_bytes()
         + (root / "assets/js/waitlist.js").read_bytes()
+        + (root / "assets/js/totop.js").read_bytes()
     )
     stamp = hashlib.sha256(css).hexdigest()[:10]
     base = cat["base"]
@@ -1150,6 +1151,7 @@ def build(out: Path = DIST) -> list[Path]:
         html = html.replace("assets/css/code.css", f"assets/css/code.css?v={stamp}")
         html = html.replace("assets/js/journey.js", f"assets/js/journey.js?v={stamp}")
         html = html.replace("assets/js/waitlist.js", f"assets/js/waitlist.js?v={stamp}")
+        html = html.replace("assets/js/totop.js", f"assets/js/totop.js?v={stamp}")
         path.write_text(html, encoding="utf-8", newline="\n")
     return list(pages)
 
