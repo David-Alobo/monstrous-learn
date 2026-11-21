@@ -40,6 +40,7 @@ from pathlib import Path
 FENCE = re.compile(r"```(python|output varies|output)\n(.*?)```\n", re.S)
 NEEDS = re.compile(r"\A# needs: (\w+)")
 SERVICE_ENV = {"postgres": "DATABASE_URL", "neo4j": "NEO4J_URI"}
+SERVICE_NAME = {"postgres": "PostgreSQL", "neo4j": "Neo4j"}  # as the reader knows them
 REPO = "David-Alobo/monstrous-learn"
 SITE = "https://monstrous.com.ng/learn/data-engineering/series-1"
 SERIES_PATH = "data-engineering/series-1"
@@ -265,7 +266,8 @@ def setup_lines(meta: dict[str, str], folder: str) -> list[str]:
     if services:
         lines += [
             "",
-            f"**This lesson also needs {' and '.join(services)}**, a database that runs in Docker"
+            f"**This lesson also needs {' and '.join(SERVICE_NAME.get(s, s) for s in services)}**,"
+            " a database that runs in Docker"
             f" on your own computer (Colab cannot run it; the rest of the lesson runs there)."
             f" [The database guide]({DOCKER_GUIDE}) shows how to install Docker and start it,"
             " step by step.",
