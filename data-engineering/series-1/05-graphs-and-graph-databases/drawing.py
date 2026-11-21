@@ -97,7 +97,7 @@ def _svg(width: float, height: float, body: str) -> Picture:
     )
 
 
-def grid_svg(molecules: list[tuple[str, str]], columns: int = 4) -> Picture:
+def grid_svg(molecules: list[tuple[str, str]], columns: int = 3) -> Picture:
     """Several molecules side by side, each in its own box, in rows of `columns`.
 
     Args:

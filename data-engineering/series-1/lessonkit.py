@@ -340,6 +340,28 @@ def export(folder: Path) -> dict[Path, str]:
         for p in folder.glob(pattern)
         if p.is_file()
     )
+    services = listed(meta, "services")
+    if services:
+        # a cell that needs a database starts with %%needs: it runs where the database is set up
+        # (on your own computer) and is skipped elsewhere (in Colab), so the rest still runs
+        where = ", ".join(f"{s!r}: {SERVICE_ENV[s]!r}" for s in services)
+        install += (
+            "\n\n# Cells that start with %%needs use a database. They run only where it is set"
+            " up (see\n# the database guide); elsewhere, such as in Colab, they are skipped and"
+            " the rest of the\n# lesson still runs. Their outputs are on the lesson's page.\n"
+            "import os\n"
+            "from IPython.core.magic import register_cell_magic\n\n\n"
+            "@register_cell_magic\n"
+            "def needs(service, cell):\n"
+            '    """Run this cell only if the database it needs is set up."""\n'
+            f"    variable = {{{where}}}[service.strip()]\n"
+            "    if os.environ.get(variable):\n"
+            "        get_ipython().run_cell(cell)\n"
+            "    else:\n"
+            '        print(f"Skipped: this cell needs {service.strip()}, which is not set up'
+            ' here."\n'
+            '              " Its output is shown on the lesson\'s page.")\n'
+        )
     if local or data:
         install += "\n\nimport pathlib\nimport urllib.request\n"
         for name, url in local:
@@ -369,6 +391,9 @@ def export(folder: Path) -> dict[Path, str]:
             cells.append(md_cell(text))
         nxt = found[i + 1] if i + 1 < len(found) else None
         follows = nxt is not None and nxt[0] != "python" and nxt[2] == end
+        need = NEEDS.match(code)
+        if need:  # skipped in a notebook where its database is not set up (see the first cell)
+            code = f"%%needs {need.group(1)}\n{code}"
         cells.append(code_cell(code, nxt[1] if follows else None))
         last = nxt[3] if follows else end
     if body[last:].strip():
