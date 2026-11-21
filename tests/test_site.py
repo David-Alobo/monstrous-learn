@@ -167,3 +167,52 @@ def test_every_page_has_a_way_back_to_the_top(site):
         html = page.read_text(encoding="utf-8")
         assert 'class="to-top" href="#top"' in html and 'id="top"' in html, page
         assert "assets/js/totop.js?v=" in html, page
+
+
+def test_every_lesson_can_be_rated(site):
+    """Every lesson page ends with the rating box, naming its own module, and asks for a star."""
+    out, pages = site
+    lessons = [p for p in pages if p.parent.parent.name == "series-1"]
+    assert lessons
+    for page in lessons:
+        html = page.read_text(encoding="utf-8")
+        module = page.parent.relative_to(out / "learn").as_posix()
+        assert f'data-module="{module}"' in html, page
+        assert 'name="rating"' in html and "github.com/David-Alobo/monstrous-learn" in html, page
+
+
+# made-up secrets that lessons show on purpose, to teach how to keep real ones out of logs
+TEACHING_FAKES = ("abc123", "hunter2", "s3cret")
+
+
+def test_no_private_information_in_the_published_site(site):
+    """Nothing private reaches the public pages, scripts or styles: no passwords or keys, no
+    personal or university contact details, no test accounts, no internal addresses."""
+    out, _ = site
+    forbidden = {
+        "a password or secret": (
+            r"(?i)(password|passwd|secret|api[_-]?key|token)\s*[:=]\s*['\"]?[A-Za-z0-9_\-]{6,}"
+        ),
+        "an application password or WP login": r"WP_AUTH|application-password|wp-login\.php",
+        "a private key": r"BEGIN (RSA |OPENSSH |EC )?PRIVATE KEY",
+        "a university email or ID": r"(?i)@student\.gla\.ac\.uk|\b\d{7}[A-Z]@",
+        "a phone number": r"\+44\s?\d{3,4}\s?\d{3}\s?\d{3,4}|\+234\s?\d{3}\s?\d{3}\s?\d{4}",
+        # a page built against a test server (the guides may still explain what 127.0.0.1 means)
+        "a test server's address": r"https?://(127\.0\.0\.1|localhost):80[0-9]{2}",
+        "a webhook or admin address": r"fluentcrm=1|hash=[0-9a-f]{8,}|/wp-admin/",
+    }
+    for path in (out / "learn").rglob("*"):
+        if path.suffix not in {".html", ".js", ".css", ".json"}:
+            continue
+        text = path.read_text(encoding="utf-8")
+        for what, pattern in forbidden.items():
+            for found in re.finditer(pattern, text):
+                if found.group(0).endswith(TEACHING_FAKES):
+                    continue  # a made-up value a lesson uses on purpose (Module 14's log cleaning)
+                raise AssertionError(f"{path}: {what}: {found.group(0)}")
+        # ours, and made-up examples at the domains reserved for examples (example.com/.org/.net)
+        allowed = {"contact@monstrous.com.ng"}
+        emails = {e.rstrip(".") for e in re.findall(r"[\w.+-]+@[\w-]+\.[\w.]+", text)} - allowed
+        real = {e for e in emails if not re.search(r"example\.(com|org|net)$", e)}
+        real = {e for e in real if e.split("@")[0] not in TEACHING_FAKES}
+        assert not {e for e in real if not e.endswith((".png", ".svg", ".js"))}, (path, real)

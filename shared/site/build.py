@@ -83,12 +83,18 @@ FIELDS_OF_STUDY = ["Chemistry", "Biochemistry", "Pharmacy or pharmacology", "Mat
 PYTHON_LEVELS = ["None yet", "A little", "Comfortable"]
 HEARD_FROM = ["LinkedIn", "Facebook", "A colleague or friend", "A search engine", "Other"]
 GOALS_MAX = 300  # characters; the same limit as waitlist.js
+# the course's repository on GitHub, where readers can give it a star
+REPO_URL = "https://github.com/David-Alobo/monstrous-learn"
+# where the rating box at the end of a lesson sends its rating (the same plugin as the waitlist);
+# FEEDBACK_ENDPOINT in the environment or .env overrides it (for testing)
+FEEDBACK_ENDPOINT = "/wp-json/monstrous/v1/feedback"
 # the waitlist offer in the side panel of lessons and guides: its own labelled box, so it is not
 # read as the answer to whatever is listed above it
 UPDATES = f"""          <div class="updates">
             <h3>Course updates</h3>
             <p>Hear when a course opens. Free, and you can unsubscribe at any time.</p>
             <a class="btn primary" href="{WAITLIST}">Join the waitlist</a>
+            <p class="star"><a href="{REPO_URL}">&#9733; Star the course on GitHub</a></p>
           </div>"""
 ICONS = {
     "read": '<path d="M4 5a2 2 0 012-2h12v16H6a2 2 0 00-2 2zM4 21V5M8 7h6M8 11h6"/>',
@@ -679,6 +685,8 @@ def course(cat: dict, i: int, k: int) -> str:
           <ul><li>A cohort, one module a week</li><li>Homework and a Discord community</li>
             <li>A certificate for the capstone</li></ul>
           <a class="btn primary" href="{WAITLIST}">Join the waitlist</a>
+          <p class="star"><a href="{REPO_URL}">&#9733; Star the course on GitHub</a>: it helps
+            other chemists find it.</p>
         </aside>
       </div>
       <nav class="next" aria-label="Other courses">{prev}{nxt}</nav>
@@ -775,6 +783,47 @@ def homework_html(src: Path) -> str:
     text = "\n".join(line for line in text.splitlines() if not line.startswith("# "))  # own title
     body = lessons.markdown.markdown(text, extensions=["fenced_code", "tables", "sane_lists"])
     return f'<section class="homework" id="homework"><h2>Homework</h2>{body}</section>'
+
+
+def rating_box(cat: dict, module: str, endpoint: str) -> str:
+    """The "How was this module?" box at the end of a lesson, and a line asking for a star.
+
+    Args:
+        cat: The catalogue.
+        module: The lesson's address on the site, e.g. data-engineering/series-1/01-graphs-...
+        endpoint: Where the rating is sent (the Monstrous Waitlist plugin's feedback address).
+
+    Returns:
+        The box's HTML.
+    """
+    stars = "".join(
+        f'<input type="radio" id="rate-{n}" name="rating" value="{n}">'
+        f'<label for="rate-{n}" title="{n} out of 5"><span aria-hidden="true">&#9733;</span>'
+        f'<span class="sr">{n} star{"s" if n > 1 else ""}</span></label>'
+        for n in range(
+            5, 0, -1
+        )  # written 5 to 1, shown 1 to 5: hovering lights the stars before it
+    )
+    return f"""<section class="rate-box" id="rate">
+  <h2>How was this module?</h2>
+  <form class="rate" data-endpoint="{escape(endpoint)}" data-module="{escape(module)}" novalidate>
+    <fieldset class="stars">
+      <legend>Your rating, from 1 (poor) to 5 (excellent)</legend>
+      <span class="row">{stars}</span></fieldset>
+    <label class="comment"><span>What would have made it clearer? (optional)</span>
+      <textarea name="comment" rows="3" maxlength="1000"></textarea></label>
+    <div class="trap" aria-hidden="true"><label>Leave this empty
+      <input name="website" tabindex="-1" autocomplete="off"></label></div>
+    <button class="btn ghost" type="submit">Send rating</button>
+    <div class="form-status" role="status" aria-live="polite"></div>
+    <p class="note">Anonymous: we keep only the rating and your comment, never your name, email or
+      address, and nothing is saved in your browser.</p>
+  </form>
+  <p class="star">Found this module useful? <a href="{REPO_URL}">&#9733; Star the course on
+    GitHub</a>: it helps other chemists find it.</p>
+</section>
+<script type="module" src="{cat["base"]}assets/js/feedback.js"></script>
+"""
 
 
 def guide(cat: dict, title: str, summary: str, html: str, toc: list) -> str:
@@ -1075,6 +1124,7 @@ def build(out: Path = DIST) -> list[Path]:
         + (root / "assets/js/journey.js").read_bytes()
         + (root / "assets/js/waitlist.js").read_bytes()
         + (root / "assets/js/totop.js").read_bytes()
+        + (root / "assets/js/feedback.js").read_bytes()
     )
     stamp = hashlib.sha256(css).hexdigest()[:10]
     base = cat["base"]
@@ -1127,6 +1177,9 @@ def build(out: Path = DIST) -> list[Path]:
                 if homework:
                     html += homework
                     toc = [*toc, ("homework", "Homework")]
+                module = f"{t['slug']}/{s['slug']}/{src.name}"
+                html += rating_box(cat, module, setting("FEEDBACK_ENDPOINT") or FEEDBACK_ENDPOINT)
+                toc = [*toc, ("rate", "Rate this module")]
                 pages[dest / "index.html"] = frame(
                     cat,
                     f"{url(cat, t, s)}{src.name}/",
@@ -1152,6 +1205,7 @@ def build(out: Path = DIST) -> list[Path]:
         html = html.replace("assets/js/journey.js", f"assets/js/journey.js?v={stamp}")
         html = html.replace("assets/js/waitlist.js", f"assets/js/waitlist.js?v={stamp}")
         html = html.replace("assets/js/totop.js", f"assets/js/totop.js?v={stamp}")
+        html = html.replace("assets/js/feedback.js", f"assets/js/feedback.js?v={stamp}")
         path.write_text(html, encoding="utf-8", newline="\n")
     return list(pages)
 
