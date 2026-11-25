@@ -1,0 +1,20 @@
+name: lab
+version: "1.0.0"
+profile: lab
+
+vars:  # settings the models read with var('...')
+  project_start: "2026-09-07"  # the Monday of week 1
+  project_end: "2026-11-30"  # the Monday after week 12
+
+models:
+  lab:
+    staging:
+      +schema: staging
+      +materialized: view
+    marts:
+      +schema: marts
+      +materialized: table
+
+seeds:
+  lab:
+    +schema: staging

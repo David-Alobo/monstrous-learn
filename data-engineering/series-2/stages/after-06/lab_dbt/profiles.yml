@@ -1,0 +1,7 @@
+lab:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('LAB_WAREHOUSE', 'work/lab.duckdb') }}"
+      threads: 1

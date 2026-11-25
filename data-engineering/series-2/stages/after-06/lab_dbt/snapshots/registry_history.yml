@@ -1,0 +1,9 @@
+snapshots:
+  - name: registry_history
+    description: Every version of every compound the registry has held, kept week by week.
+    relation: source('raw', 'registry')
+    config:
+      schema: snapshots
+      unique_key: compound_id
+      strategy: check
+      check_cols: [smiles, salt, batch, chemist, vendor]

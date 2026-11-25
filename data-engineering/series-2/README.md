@@ -33,7 +33,10 @@ Series 1 built each piece of a chemical data pipeline by hand. Series 2 hands th
 
    [Read the lesson](https://monstrous.com.ng/learn/data-engineering/series-2/05-tests-and-contracts/) · [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/David-Alobo/monstrous-learn/blob/main/data-engineering/series-2/05-tests-and-contracts/notebook.ipynb)
 
-6. **History and corrections.** Assays are corrected and compounds re-registered: keep every version with snapshots, and rebuild only what changed with incremental models. *dbt*
+6. **[History and corrections](06-history-and-corrections/)**. Assays are corrected and compounds re-registered: keep every version with snapshots, and rebuild only what changed with incremental models. *dbt*
+
+   [Read the lesson](https://monstrous.com.ng/learn/data-engineering/series-2/06-history-and-corrections/) · [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/David-Alobo/monstrous-learn/blob/main/data-engineering/series-2/06-history-and-corrections/notebook.ipynb)
+
 
 ### Operations
 
