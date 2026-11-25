@@ -1,0 +1,6 @@
+target,chembl_id,role
+EGFR,CHEMBL203,primary
+ABL1,CHEMBL1862,panel
+BRAF,CHEMBL5145,panel
+CDK2,CHEMBL301,panel
+JAK2,CHEMBL2971,panel

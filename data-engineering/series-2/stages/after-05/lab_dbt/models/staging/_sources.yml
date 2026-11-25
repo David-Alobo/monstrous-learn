@@ -1,0 +1,9 @@
+sources:
+  - name: raw
+    description: The lab's files, loaded unchanged by dlt (Module 2).
+    schema: raw
+    tables:
+      - name: registry
+        description: The latest compound registry export. Replaced on every load.
+      - name: assay
+        description: Every row of every assay file, merged on result_id.

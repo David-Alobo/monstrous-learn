@@ -1,0 +1,78 @@
+models:
+  - name: dim_compound
+    description: One row per compound in the current registry, with its chemical series and
+      properties worked out once with RDKit.
+    columns:
+      - name: compound_key
+        description: The warehouse's key for the compound (a surrogate key).
+        data_tests: [unique, not_null]
+      - name: compound_id
+        description: The lab's ID for the compound (the natural key), e.g. LAB-0042.
+        data_tests: [unique, not_null]
+      - name: series
+        description: The series whose core the parent contains; empty if none or several, for a
+          person to check.
+      - name: clogp
+        description: Crippen's estimate of the octanol-water partition coefficient (RDKit).
+  - name: dim_target
+    columns:
+      - name: target_key
+        data_tests: [unique, not_null]
+      - name: role
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [primary, panel]
+  - name: dim_date
+    columns:
+      - name: date_key
+        data_tests: [unique, not_null]
+  - name: fact_measurement
+    description: One row per measurement of one compound on one target, in one well of one plate.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: result_id
+        data_type: varchar
+        constraints: [{type: not_null}, {type: primary_key}]
+      - name: compound_key
+        data_type: bigint
+        constraints: [{type: not_null}]
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_compound')
+                field: compound_key
+      - name: target_key
+        data_type: bigint
+        constraints: [{type: not_null}]
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_target')
+                field: target_key
+      - name: run_date
+        data_type: date
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_key
+      - name: plate
+        data_type: varchar
+      - name: replicate
+        data_type: integer
+      - name: relation
+        data_type: varchar
+        description: "'=' for a measured value; '>' when the compound was weaker than the highest
+          concentration tested, so ic50_nm is only a bound."
+      - name: ic50_nm
+        data_type: double
+      - name: pic50
+        data_type: double
+        description: 9 - log10(ic50_nm). Average potencies as pIC50, over measured values only.
+      - name: source_file
+        data_type: varchar
+  - name: measurements_wide
+    description: The star joined once, for dashboards. Built from the star; never edit it.

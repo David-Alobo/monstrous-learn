@@ -1,0 +1,30 @@
+models:
+  - name: stg_compounds
+    description: The current registry, one row per compound.
+    columns:
+      - name: compound_id
+        data_tests: [unique, not_null]
+  - name: stg_results
+    description: One row per result, every value in nanomolar.
+    data_tests:
+      - unique_combination:  # the grain: one result per compound, target and well
+          arguments:
+            columns: [compound_id, target, plate, replicate]
+    columns:
+      - name: result_id
+        data_tests: [unique, not_null]
+      - name: compound_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_compounds')
+                field: compound_id
+      - name: relation
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['=', '>']
+      - name: ic50_nm
+        description: Empty if the unit is not in the unit_to_nm seed.
+        data_tests: [not_null]

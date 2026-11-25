@@ -237,18 +237,23 @@ def dbt(project: str | Path, *args: str, log: logging.Logger | None = None):
         `ls`; the catalogue of `docs generate`.
 
     Raises:
-        RuntimeError: If anything could not be built (a model's SQL failed, not a test).
+        RuntimeError: If anything could not be built (a model's SQL or its contract failed; a
+            failing test is logged, not raised), with dbt's reason for each.
     """
     log = log or logging.getLogger()
+    # dbt's own console messages carry the time; keep them off the screen (its log file keeps
+    # them all), except for `ls`, whose list is its output
+    quiet = ["--quiet"] if args[0] == "ls" else ["--log-level", "none"]
     result = dbtRunner().invoke(
-        [*args, "--quiet", "--project-dir", str(project), "--profiles-dir", str(project)]
+        [*args, *quiet, "--project-dir", str(project), "--profiles-dir", str(project)]
     )
     if result.exception:
         raise result.exception
     if args[0] in ("build", "run", "seed", "test", "snapshot"):
         for item in result.result:
             log.info("%s %s: %s", item.node.resource_type, item.node.name, item.status)
-        broken = [item.node.name for item in result.result if item.status == "error"]
+        broken = [item for item in result.result if item.status == "error"]
         if broken:
-            raise RuntimeError(f"dbt could not build {broken}: see {project}/logs/dbt.log")
+            reasons = "\n".join(f"{item.node.name}: {item.message}" for item in broken)
+            raise RuntimeError(f"dbt could not build:\n{reasons}")
     return result.result
