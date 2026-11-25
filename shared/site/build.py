@@ -17,7 +17,6 @@ from the catalogue, so the two never disagree.
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import json
 import os
 import shutil
@@ -26,25 +25,23 @@ import zipfile
 from html import escape
 from pathlib import Path
 
+from .. import lessonkit
 from . import lessons
 
 
 def setup_html(series_folder: str, meta: dict, folder: str) -> str:
-    """A lesson's "Get set up" box, from its series' own lessonkit (the same text as the notebook
+    """A lesson's "Get set up" box, from the shared lessonkit (the same text as the notebook
     and the module README), with download links to the notebook and the code beside the page.
 
     Args:
-        series_folder: The series' folder, which holds its lessonkit.py.
+        series_folder: The series' folder in the repository, e.g. data-engineering/series-1.
         meta: The lesson's front matter.
         folder: The module's folder name.
 
     Returns:
         The box's HTML.
     """
-    spec = importlib.util.spec_from_file_location("lessonkit", Path(series_folder, "lessonkit.py"))
-    kit = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(kit)
-    lines = kit.setup_lines(meta, folder)[1:]  # without its own heading
+    lines = lessonkit.setup_lines(meta, folder, series_folder)[1:]  # without its own heading
     body = lessons.markdown.markdown(
         "\n".join(lines),
         extensions=["fenced_code", "codehilite"],

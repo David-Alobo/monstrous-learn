@@ -1,19 +1,38 @@
 # Series 2: The Modern Data Stack for Chemistry
 
-Track: Data Engineering for Chemistry. Production tools for lab data: ingestion, warehousing, transformation and scheduling.
+Track: Data Engineering for Chemistry. The industry tools that run chemical data pipelines: ingestion, warehousing, transformation, testing, orchestration and dashboards.
 
 **Status:** Planned · **Level:** After Series 1 · **[Read it online](https://monstrous.com.ng/learn/data-engineering/series-2/)**
 
-The tools data teams use in industry, applied to chemistry: declarative ingestion, a fast local warehouse, version-controlled transformations with lineage, scheduled pipelines and dashboards for medicinal chemists.
+Series 1 built each piece of a chemical data pipeline by hand. Series 2 hands those pieces to the open-source tools data teams use in industry, one by one: declarative ingestion with dlt, a DuckDB warehouse modelled for compounds and assays, transformations, tests and history with dbt, orchestration with Prefect, observability, continuous integration, and structure-activity dashboards in Streamlit. Every module says which Series 1 module it replaces, and everything runs in the browser as well as on your own computer.
 
 ## Modules
 
-1. **Designing a lab data architecture.** From folders and spreadsheets to a modular open-source stack.
-2. **Declarative ingestion.** Load chemical APIs and lab exports incrementally, coping with changing schemas. *dlt*
-3. **A fast analytical warehouse.** Query millions of descriptors locally with DuckDB and Parquet. *DuckDB, Parquet*
-4. **Transformations with lineage.** Version-controlled models joining structures with assay results. *dbt*
-5. **Scheduled pipelines.** Run standardisation and fingerprint updates automatically when new data arrives. *Prefect*
-6. **Structure-activity dashboards.** Interactive views of structure-activity relationships for medicinal chemists.
+### Foundations
+
+1. **Designing a lab data architecture.** From folders and spreadsheets to layers a team can trust: raw, staging and marts; extract-load-transform; and where each piece of Series 1 goes in a modern data stack.
+2. **Declarative ingestion.** Load ChEMBL's API and a lab's instrument exports with a few lines of configuration: schema inference, schema changes, incremental state and retries handled by the tool, compared with Series 1's hand-written loader. *dlt*
+3. **Modelling the warehouse.** Compounds, assays, targets and measurements as a star schema in DuckDB: facts and dimensions, keys, and why analysts and dashboards need this shape. *DuckDB*
+
+### Transformation
+
+4. **Transformations with lineage.** Turn raw tables into clean ones with SQL models that reference each other; dbt builds them in order, draws the lineage graph and writes the documentation. *dbt*
+5. **Tests and contracts in the warehouse.** Check every build: dbt tests for keys, values and relationships, model contracts, and chemistry checks on structures with pandera-chem. *dbt, pandera-chem*
+6. **History and corrections.** Assays are corrected and compounds re-registered: keep every version with snapshots, and rebuild only what changed with incremental models. *dbt*
+
+### Operations
+
+7. **Orchestration.** Run the whole pipeline as a flow: tasks, retries, caching, schedules, and runs triggered when new data arrives. *Prefect*
+8. **Observability.** Know when something is wrong before the chemists do: freshness, row counts, schema changes and drift in molecular properties, with alerts. *Prefect, dbt*
+9. **Continuous integration for data.** Test every change before it reaches the warehouse: dbt builds and checks on each pull request, in GitHub Actions. *GitHub Actions, dbt*
+
+### Serving
+
+10. **Structure-activity dashboards.** Give medicinal chemists interactive views of their series: structures, potencies and trends, served from the warehouse. *Streamlit*
+
+### Capstone
+
+11. **Capstone: a running data stack for a small lab.** Ingest, model, test, schedule, monitor and serve one lab's chemistry data end to end, and hand it over with its documentation. *Everything above*
 
 Each module will have its own folder here, with its lesson and notebook.
 

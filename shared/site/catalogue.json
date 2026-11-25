@@ -214,61 +214,119 @@
           "folder": "data-engineering/series-2",
           "number": 2,
           "title": "The Modern Data Stack for Chemistry",
-          "tagline": "Production tools for lab data: ingestion, warehousing, transformation and scheduling.",
+          "tagline": "The industry tools that run chemical data pipelines: ingestion, warehousing, transformation, testing, orchestration and dashboards.",
           "status": "Planned",
           "level": "After Series 1",
-          "summary": "The tools data teams use in industry, applied to chemistry: declarative ingestion, a fast local warehouse, version-controlled transformations with lineage, scheduled pipelines and dashboards for medicinal chemists.",
+          "summary": "Series 1 built each piece of a chemical data pipeline by hand. Series 2 hands those pieces to the open-source tools data teams use in industry, one by one: declarative ingestion with dlt, a DuckDB warehouse modelled for compounds and assays, transformations, tests and history with dbt, orchestration with Prefect, observability, continuous integration, and structure-activity dashboards in Streamlit. Every module says which Series 1 module it replaces, and everything runs in the browser as well as on your own computer.",
           "tools": [
             "dlt",
             "DuckDB",
             "dbt",
-            "Prefect"
+            "Prefect",
+            "Streamlit",
+            "GitHub Actions",
+            "pandera-chem"
           ],
           "modules": [
             {
-              "number": 1,
+              "part": "Foundations",
               "title": "Designing a lab data architecture",
-              "what": "From folders and spreadsheets to a modular open-source stack.",
-              "tools": []
+              "what": "From folders and spreadsheets to layers a team can trust: raw, staging and marts; extract-load-transform; and where each piece of Series 1 goes in a modern data stack.",
+              "tools": [],
+              "number": 1
             },
             {
-              "number": 2,
+              "part": "Foundations",
               "title": "Declarative ingestion",
-              "what": "Load chemical APIs and lab exports incrementally, coping with changing schemas.",
+              "what": "Load ChEMBL's API and a lab's instrument exports with a few lines of configuration: schema inference, schema changes, incremental state and retries handled by the tool, compared with Series 1's hand-written loader.",
               "tools": [
                 "dlt"
-              ]
+              ],
+              "number": 2
             },
             {
-              "number": 3,
-              "title": "A fast analytical warehouse",
-              "what": "Query millions of descriptors locally with DuckDB and Parquet.",
+              "part": "Foundations",
+              "title": "Modelling the warehouse",
+              "what": "Compounds, assays, targets and measurements as a star schema in DuckDB: facts and dimensions, keys, and why analysts and dashboards need this shape.",
               "tools": [
-                "DuckDB",
-                "Parquet"
-              ]
+                "DuckDB"
+              ],
+              "number": 3
             },
             {
-              "number": 4,
+              "part": "Transformation",
               "title": "Transformations with lineage",
-              "what": "Version-controlled models joining structures with assay results.",
+              "what": "Turn raw tables into clean ones with SQL models that reference each other; dbt builds them in order, draws the lineage graph and writes the documentation.",
               "tools": [
                 "dbt"
-              ]
+              ],
+              "number": 4
             },
             {
-              "number": 5,
-              "title": "Scheduled pipelines",
-              "what": "Run standardisation and fingerprint updates automatically when new data arrives.",
+              "part": "Transformation",
+              "title": "Tests and contracts in the warehouse",
+              "what": "Check every build: dbt tests for keys, values and relationships, model contracts, and chemistry checks on structures with pandera-chem.",
+              "tools": [
+                "dbt",
+                "pandera-chem"
+              ],
+              "number": 5
+            },
+            {
+              "part": "Transformation",
+              "title": "History and corrections",
+              "what": "Assays are corrected and compounds re-registered: keep every version with snapshots, and rebuild only what changed with incremental models.",
+              "tools": [
+                "dbt"
+              ],
+              "number": 6
+            },
+            {
+              "part": "Operations",
+              "title": "Orchestration",
+              "what": "Run the whole pipeline as a flow: tasks, retries, caching, schedules, and runs triggered when new data arrives.",
               "tools": [
                 "Prefect"
-              ]
+              ],
+              "number": 7
             },
             {
-              "number": 6,
+              "part": "Operations",
+              "title": "Observability",
+              "what": "Know when something is wrong before the chemists do: freshness, row counts, schema changes and drift in molecular properties, with alerts.",
+              "tools": [
+                "Prefect",
+                "dbt"
+              ],
+              "number": 8
+            },
+            {
+              "part": "Operations",
+              "title": "Continuous integration for data",
+              "what": "Test every change before it reaches the warehouse: dbt builds and checks on each pull request, in GitHub Actions.",
+              "tools": [
+                "GitHub Actions",
+                "dbt"
+              ],
+              "number": 9
+            },
+            {
+              "part": "Serving",
               "title": "Structure-activity dashboards",
-              "what": "Interactive views of structure-activity relationships for medicinal chemists.",
-              "tools": []
+              "what": "Give medicinal chemists interactive views of their series: structures, potencies and trends, served from the warehouse.",
+              "tools": [
+                "Streamlit"
+              ],
+              "number": 10
+            },
+            {
+              "part": "Capstone",
+              "title": "Capstone: a running data stack for a small lab",
+              "what": "Ingest, model, test, schedule, monitor and serve one lab's chemistry data end to end, and hand it over with its documentation.",
+              "tools": [
+                "Everything above"
+              ],
+              "number": 11
             }
           ]
         },

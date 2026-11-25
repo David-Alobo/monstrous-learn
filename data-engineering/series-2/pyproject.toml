@@ -1,0 +1,32 @@
+[project]
+name = "monstrous-learn-series-2"
+version = "0.1.0"
+description = "Series 2: The Modern Data Stack for Chemistry. The code, tests and figures of every module."
+requires-python = ">=3.11"
+dependencies = [
+    "duckdb>=1.1",
+    "pandas>=2.2",
+    "pyarrow>=17",
+    "rdkit>=2024.9",
+    "dlt[duckdb]>=1.4",
+    "dbt-core>=1.9",
+    "dbt-duckdb>=1.9",
+    "prefect>=3.1",
+    "streamlit>=1.40",
+    "pandera-chem[units]>=0.4",
+    "requests>=2.32",
+    "python-dotenv>=1.0",
+    "matplotlib>=3.9",
+]
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# made from each lesson by lessonkit.py --export, in the lesson's own order
+extend-exclude = ["*/code.py", "*/notebook.ipynb", "*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["."]
