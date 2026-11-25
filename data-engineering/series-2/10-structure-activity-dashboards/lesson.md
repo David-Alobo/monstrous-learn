@@ -417,7 +417,8 @@ LAB-0042 shows what a dashboard built on the warehouse of Modules 2 to 9 can say
 could not: its current structure, every result with its status, and a warning that the measurements
 were made while the registry held a different structure, with the history to prove it. (`choice`
 comes from the select box, which only offers IDs from the warehouse, so putting it in the SQL is
-safe here; with free text from a user it would not be.)
+safe here; with free text from a user it would not be: [Series 1, Module
+4](../../series-1/04-databases-and-schemas/), section 8, shows the attack and the cure.)
 
 ## 7. Running it
 

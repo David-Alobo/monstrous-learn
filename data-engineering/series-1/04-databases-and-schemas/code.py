@@ -343,3 +343,43 @@ with psycopg.connect(analyst_url, autocommit=True) as colleague:
     except psycopg.errors.InsufficientPrivilege as error:
         print("the analyst cannot delete:", str(error).strip())
 pg.close()
+
+# ---- Values from outside: SQL injection ----
+shop = duckdb.connect(DUCKDB_FILE, read_only=True)  # the search page's connection: reading only
+
+
+def find_supplier_unsafe(name: str) -> list:
+    """A search written the WRONG way: the user's text is pasted into the SQL."""
+    return shop.execute(f"SELECT name, country FROM supplier WHERE name = '{name}'").fetchall()
+
+
+print(find_supplier_unsafe("Vendor A"))
+print(find_supplier_unsafe("nobody' OR '1'='1"))
+print(find_supplier_unsafe("nobody' UNION SELECT inchikey, smiles FROM compound ORDER BY 1 LIMIT 2 --"))
+try:
+    find_supplier_unsafe("nobody'; DROP TABLE measurement; --")
+except duckdb.Error as error:
+    print("refused:", str(error).splitlines()[0])
+def find_supplier(name: str) -> list:
+    """The same search, written safely: the name is passed as a parameter, never as SQL."""
+    return shop.execute("SELECT name, country FROM supplier WHERE name = ?", [name]).fetchall()
+
+
+for attempt in ["Vendor A", "nobody' OR '1'='1", "nobody'; DROP TABLE measurement; --"]:
+    print(f"{attempt!r:40} -> {find_supplier(attempt)}")
+SORTABLE = {"name", "country"}  # the columns the search page may sort by
+
+
+def suppliers_sorted_by(column: str) -> list:
+    """Suppliers sorted by a column the user chose, checked against the allowed names first."""
+    if column not in SORTABLE:
+        raise ValueError(f"cannot sort by {column!r}")
+    return [row[0] for row in shop.execute(f"SELECT name FROM supplier ORDER BY {column}").fetchall()]
+
+
+print(suppliers_sorted_by("country"))
+try:
+    suppliers_sorted_by("name; DROP TABLE measurement")
+except ValueError as error:
+    print("refused:", error)
+shop.close()

@@ -34,3 +34,9 @@ answers; everyone can check theirs against the answers published after the cohor
    instrument files with metadata that differs by instrument; (d) find compounds whose learned
    embedding is near a new hit. Which kind of database would you use for each, and what rights
    would each program or person get?
+7. **SQL injection** (section 8). Write `find_compound_unsafe(inchikey)`, which pastes an InChIKey
+   into `SELECT compound_id, smiles FROM compound WHERE inchikey = '...'`, on a read-only connection
+   to `work/chem.duckdb`. Find a text that makes it return every compound, and one that makes it
+   return the suppliers' names and countries instead. Then write `find_compound(inchikey)` with a
+   parameter, and show that both texts now return nothing. Why could neither attack be stopped by
+   the read-only connection alone?

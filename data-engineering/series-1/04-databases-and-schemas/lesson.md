@@ -34,7 +34,8 @@ By the end of this module you will be able to:
 - reshape tables for analysis (a star schema);
 - store molecules in PostgreSQL with the RDKit cartridge, search them by substructure and by
   similarity, and see an index make a search faster;
-- give a colleague read-only access, and keep passwords out of your code.
+- give a colleague read-only access, and keep passwords out of your code;
+- see how SQL injection works, and stop it with parameters and lists of allowed names.
 
 From earlier modules we use SMILES, InChIKeys, SMARTS patterns and fingerprints
 ([Module 2](../02-text-patterns-and-numbers/)), and the course's helper file `chemlib`, which makes
@@ -823,6 +824,109 @@ Even the passwords for these practice databases, which nobody else can reach, li
 not in the code: good habits are cheapest to learn on something that does not matter yet. A
 database on a server gets long random passwords, kept by whoever runs it, and changed if they ever
 leak.
+
+### Values from outside: SQL injection
+
+Every program that puts a value from outside into SQL (a search box, a form, a file name, a row of
+a supplier's file) must do it one way only: as a **parameter**, sent to the database separately from
+the SQL. This lesson has done so all along: psycopg's `%s` in section 7, and the way names of
+schemas and accounts are quoted with `sql.Identifier`. Here is why, on the DuckDB database of
+sections 3 to 6, so it runs anywhere.
+
+Imagine a small search page for the lab, where a chemist types a supplier's name. The page's
+connection is **read-only** (`read_only=True`): a search never needs to change anything, so by the
+principle of least privilege above it should not be able to. The search below is written the wrong
+way, by pasting the text into the SQL with an f-string:
+
+```python
+shop = duckdb.connect(DUCKDB_FILE, read_only=True)  # the search page's connection: reading only
+
+
+def find_supplier_unsafe(name: str) -> list:
+    """A search written the WRONG way: the user's text is pasted into the SQL."""
+    return shop.execute(f"SELECT name, country FROM supplier WHERE name = '{name}'").fetchall()
+
+
+print(find_supplier_unsafe("Vendor A"))
+print(find_supplier_unsafe("nobody' OR '1'='1"))
+print(find_supplier_unsafe("nobody' UNION SELECT inchikey, smiles FROM compound ORDER BY 1 LIMIT 2 --"))
+try:
+    find_supplier_unsafe("nobody'; DROP TABLE measurement; --")
+except duckdb.Error as error:
+    print("refused:", str(error).splitlines()[0])
+```
+```output
+[('Vendor A', 'United Kingdom')]
+[('Vendor A', 'United Kingdom'), ('Vendor B', 'Germany'), ('Vendor C', 'India')]
+[('AAPXMIQKYKFYCQ-UHFFFAOYSA-N', 'CCONC(=O)C(CC)NC(=O)c1cc(C)cc(N(C)C)c1'), ('AAPYJNIARROXBV-UHFFFAOYSA-N', 'CS(=O)(=O)c1cc(C(=O)NC(CC(N)=O)C(=O)Nc2ccc(F)cc2)cc(-c2ccc(F)cc2)c1')]
+refused: Invalid Input Error: Cannot execute statement of type "DROP" on database "chem" which is attached in read-only mode!
+```
+
+The first search does what it should. The other three are **SQL injection**: text written so that,
+once pasted in, it changes what the SQL means.
+
+- `nobody' OR '1'='1` closes the quote early and adds a condition that is always true, so the search
+  returns every supplier. On a login page the same trick can log someone in without a password.
+- `nobody' UNION SELECT ... --` closes the quote and adds a second query: `UNION` joins its rows to
+  the first query's, so the search page now shows compounds, data it was never meant to give out.
+  `--` starts an SQL comment, which hides the stray quote at the end.
+- `nobody'; DROP TABLE measurement; --` adds a second statement, to delete a table. The read-only
+  connection refused it, which is least privilege doing its job: it limits the damage, but it did
+  not stop the first two attacks, which only read.
+
+The cure is a parameter. `?` marks where a value goes (psycopg writes `%s`), and the value is passed
+separately, as a list. The database receives the SQL and the value apart, so the value can only
+ever be a value: a name containing quotes is just an odd name, which matches no supplier.
+
+```python
+def find_supplier(name: str) -> list:
+    """The same search, written safely: the name is passed as a parameter, never as SQL."""
+    return shop.execute("SELECT name, country FROM supplier WHERE name = ?", [name]).fetchall()
+
+
+for attempt in ["Vendor A", "nobody' OR '1'='1", "nobody'; DROP TABLE measurement; --"]:
+    print(f"{attempt!r:40} -> {find_supplier(attempt)}")
+```
+```output
+'Vendor A'                               -> [('Vendor A', 'United Kingdom')]
+"nobody' OR '1'='1"                      -> []
+"nobody'; DROP TABLE measurement; --"    -> []
+```
+
+Parameters carry values only. The *names* of tables and columns cannot be parameters, so when a
+user chooses one (a column to sort by, say), check it against a list of names you allow, and refuse
+anything else. In PostgreSQL, psycopg's `sql.Identifier` quotes a name safely, as section 7 does for
+the schema's name.
+
+```python
+SORTABLE = {"name", "country"}  # the columns the search page may sort by
+
+
+def suppliers_sorted_by(column: str) -> list:
+    """Suppliers sorted by a column the user chose, checked against the allowed names first."""
+    if column not in SORTABLE:
+        raise ValueError(f"cannot sort by {column!r}")
+    return [row[0] for row in shop.execute(f"SELECT name FROM supplier ORDER BY {column}").fetchall()]
+
+
+print(suppliers_sorted_by("country"))
+try:
+    suppliers_sorted_by("name; DROP TABLE measurement")
+except ValueError as error:
+    print("refused:", error)
+shop.close()
+```
+```output
+['Vendor B', 'Vendor C', 'Vendor A']
+refused: cannot sort by 'name; DROP TABLE measurement'
+```
+
+You will often read that an **ORM** (object-relational mapper, such as SQLAlchemy or Django's
+models, which let code treat tables as Python classes) prevents SQL injection. It does, for the
+queries it writes, and for exactly this reason: an ORM always sends values as parameters. But every
+ORM also lets you write raw SQL (SQLAlchemy's `text()`, for example), and raw SQL built with an
+f-string is as open to injection there as it is here. The rule is the same with or without one:
+values as parameters, names checked against a list, and no text from outside ever pasted into SQL.
 
 ## 9. Which database for which job
 
