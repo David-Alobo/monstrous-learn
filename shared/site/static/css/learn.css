@@ -175,6 +175,10 @@ a.course:hover { border-color: var(--violet); transform: translateY(-2px); }
 .toc .contents { list-style: none; margin: 0 0 1rem; padding: 0; font-size: 0.9rem; display: grid; gap: 0.35rem; }
 .toc .contents a { color: var(--ink-2); text-decoration: none; }
 .toc .contents a:hover { color: var(--violet); }
+/* the section being read (toc.js): purple, with a bar at its left */
+.toc .contents a { display: block; padding-left: 0.6rem; border-left: 2px solid transparent; transition: color .15s, border-color .15s; }
+.toc .contents a.active { color: var(--violet); font-weight: 600; border-left-color: var(--violet); }
+@media (prefers-reduced-motion: reduce) { .toc .contents a { transition: none; } }
 .toc code { font: 0.85em var(--mono); }
 .next .soon { color: var(--ink-3); font: 500 0.92rem var(--heading); }
 @media (max-width: 900px) { .lesson-split { grid-template-columns: 1fr; } .toc { order: -1; } }

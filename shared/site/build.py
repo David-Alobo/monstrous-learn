@@ -1223,6 +1223,7 @@ def build(out: Path = DIST) -> list[Path]:
         + (root / "assets/js/journey.js").read_bytes()
         + (root / "assets/js/waitlist.js").read_bytes()
         + (root / "assets/js/totop.js").read_bytes()
+        + (root / "assets/js/toc.js").read_bytes()
         + (root / "assets/js/feedback.js").read_bytes()
     )
     stamp = hashlib.sha256(css).hexdigest()[:10]
@@ -1304,6 +1305,7 @@ def build(out: Path = DIST) -> list[Path]:
         html = html.replace("assets/js/journey.js", f"assets/js/journey.js?v={stamp}")
         html = html.replace("assets/js/waitlist.js", f"assets/js/waitlist.js?v={stamp}")
         html = html.replace("assets/js/totop.js", f"assets/js/totop.js?v={stamp}")
+        html = html.replace("assets/js/toc.js", f"assets/js/toc.js?v={stamp}")
         html = html.replace("assets/js/feedback.js", f"assets/js/feedback.js?v={stamp}")
         path.write_text(html, encoding="utf-8", newline="\n")
     return list(pages)
