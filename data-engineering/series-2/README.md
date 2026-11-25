@@ -10,7 +10,10 @@ Series 1 built each piece of a chemical data pipeline by hand. Series 2 hands th
 
 ### Foundations
 
-1. **Designing a lab data architecture.** From folders and spreadsheets to layers a team can trust: raw, staging and marts; extract-load-transform; and where each piece of Series 1 goes in a modern data stack.
+1. **[Designing a lab data architecture](01-lab-data-architecture/)**. From folders and spreadsheets to layers a team can trust: raw, staging and marts; extract-load-transform; and where each piece of Series 1 goes in a modern data stack.
+
+   [Read the lesson](https://monstrous.com.ng/learn/data-engineering/series-2/01-lab-data-architecture/) · [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/David-Alobo/monstrous-learn/blob/main/data-engineering/series-2/01-lab-data-architecture/notebook.ipynb)
+
 2. **Declarative ingestion.** Load ChEMBL's API and a lab's instrument exports with a few lines of configuration: schema inference, schema changes, incremental state and retries handled by the tool, compared with Series 1's hand-written loader. *dlt*
 3. **Modelling the warehouse.** Compounds, assays, targets and measurements as a star schema in DuckDB: facts and dimensions, keys, and why analysts and dashboards need this shape. *DuckDB*
 
@@ -34,7 +37,9 @@ Series 1 built each piece of a chemical data pipeline by hand. Series 2 hands th
 
 11. **Capstone: a running data stack for a small lab.** Ingest, model, test, schedule, monitor and serve one lab's chemistry data end to end, and hand it over with its documentation. *Everything above*
 
-Each module will have its own folder here, with its lesson and notebook.
+Each module folder holds the lesson (`lesson.md`), a notebook, the code on its own
+and the homework. New to notebooks?
+[Start here](https://monstrous.com.ng/learn/start/) shows every step.
 
 *This file is written from `shared/site/catalogue.json` by `python -m shared.site.build`;
 the course page is https://monstrous.com.ng/learn/data-engineering/series-2/.*

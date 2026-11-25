@@ -77,6 +77,12 @@ pipeline you could run in production:
 | 14 | [Monitoring pipelines](data-engineering/series-1/14-monitoring-pipelines/) | [Read the lesson](https://monstrous.com.ng/learn/data-engineering/series-1/14-monitoring-pipelines/) · [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/David-Alobo/monstrous-learn/blob/main/data-engineering/series-1/14-monitoring-pipelines/notebook.ipynb) |
 | 15 | [Capstone: a resumable, monitored pipeline over a large library](data-engineering/series-1/15-capstone/) | [Read the lesson](https://monstrous.com.ng/learn/data-engineering/series-1/15-capstone/) · [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/David-Alobo/monstrous-learn/blob/main/data-engineering/series-1/15-capstone/notebook.ipynb) |
 
+**Series 2: The Modern Data Stack for Chemistry**
+
+| # | Module | Read or run it |
+|---|---|---|
+| 1 | [Designing a lab data architecture](data-engineering/series-2/01-lab-data-architecture/) | [Read the lesson](https://monstrous.com.ng/learn/data-engineering/series-2/01-lab-data-architecture/) · [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/David-Alobo/monstrous-learn/blob/main/data-engineering/series-2/01-lab-data-architecture/notebook.ipynb) |
+
 <!-- modules:end -->
 
 Each module folder holds the lesson, a notebook, the code on its own and the homework. The full
