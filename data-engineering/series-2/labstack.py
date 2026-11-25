@@ -143,7 +143,13 @@ def load_inbox(inbox: str | Path, pipeline: dlt.Pipeline) -> dict[str, int]:
     return {table: n for table, n in counts.items() if not table.startswith("_dlt")}
 
 
-def warehouse_at(lab: labdata.Lab, week: int, work: str | Path) -> Path:
+def warehouse_at(
+    lab: labdata.Lab,
+    week: int,
+    work: str | Path,
+    project: str | Path | None = None,
+    build: bool = True,
+) -> Path:
     """The lab's warehouse as Module 6 left it, at the end of a week, built from nothing.
 
     Each week from 1 is loaded and snapshotted in turn (the snapshot keeps the registry's
@@ -154,19 +160,26 @@ def warehouse_at(lab: labdata.Lab, week: int, work: str | Path) -> Path:
         lab: The lab.
         week: The last week to load.
         work: The working folder (the dbt profile expects work/lab.duckdb, relative to where
-            the code runs, unless LAB_WAREHOUSE says otherwise).
+            the code runs, unless the environment variable LAB_WAREHOUSE says otherwise).
+        project: A dbt project to build instead of Module 6's (Module 9 builds a changed one);
+            its warehouse is then the one its profile names.
+        build: Whether to build the project at the end (Module 9 builds it itself).
 
     Returns:
         The dbt project's folder.
     """
     work = Path(work)
-    project = dbt_project(work / "lab_dbt", after=6)
-    pipeline = lab_pipeline(work / "lab.duckdb", work / "dlt")
+    if project is None:
+        project = dbt_project(work / "lab_dbt", after=6)
+    project = Path(project)
+    warehouse = os.environ.get("LAB_WAREHOUSE", str(work / "lab.duckdb"))
+    pipeline = lab_pipeline(warehouse, work / "dlt")
     for each in range(1, week + 1):
         lab.write_week(each, work / "inbox")
         load_inbox(work / "inbox", pipeline)
         dbt(project, "snapshot", log=_SILENT)
-    dbt(project, "build", log=_SILENT)
+    if build:
+        dbt(project, "build", log=_SILENT)
     return project
 
 

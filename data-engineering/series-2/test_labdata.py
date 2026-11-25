@@ -84,7 +84,7 @@ def test_potency_follows_structure_with_cliffs(lab):
 
 
 def test_planted_events_happen_when_listed(lab):
-    assert list(lab.events["week"]) == [2, 4, 5, 7, 8, 10]
+    assert list(lab.events["week"]) == [2, 4, 5, 7, 8, 10, 11]
     assert "units" in lab.assay_export(4).columns and "unit" not in lab.assay_export(4).columns
     week5 = lab.assay_export(5)
     assert "unit" in week5.columns and "operator" in week5.columns and "units" not in week5.columns

@@ -274,8 +274,10 @@ First, staging passes the status on. One difficulty: the `status` column exists 
 week 8 on, so in a warehouse holding earlier weeks only, the raw table has no such column and the
 model would fail. dbt can ask the warehouse which columns a table has while it compiles the model:
 `adapter.get_columns_in_relation(...)` returns them, and a Jinja `if` then writes `status` if it is
-there and `'final'` if it is not. The model also passes on `load_id` (dlt's `_dlt_load_id`, the
-load that brought each row), which section 5 needs:
+there and `'final'` if it is not. The same is true of `unit`, which arrived in week 5: the model
+now copes with a raw table from any week of the project, which [Module 8](../08-observability/)
+needs. The model also passes on `load_id` (dlt's `_dlt_load_id`, the load that brought each row),
+which section 5 needs:
 
 ```python
 write("models/staging/stg_results.sql", """
@@ -287,7 +289,9 @@ with typed as (
            replicate::integer      as replicate,
            relation,
            value::double           as value,
-           coalesce(unit, units)   as unit,  -- 'units' was renamed 'unit' in week 5
+           -- 'units' was renamed 'unit' in week 5
+           {% if 'unit' in columns %}coalesce(unit, units){% else %}units{% endif %}
+                                   as unit,
            -- 'status' arrived in week 8: superseded, corrected or final
            {% if 'status' in columns %}coalesce(status, 'final'){% else %}'final'{% endif %}
                                    as status,

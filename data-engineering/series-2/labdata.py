@@ -55,6 +55,9 @@ SALTS = {"": "", "HCl": ".Cl", "TFA": ".O=C(O)C(F)(F)F"}
 TOP_NM = 30_000.0  # the highest concentration tested: weaker compounds are reported as "> 30 uM"
 PANEL_CUTOFF = 7.0  # compounds at least this potent on EGFR (pIC50) go on to the panel
 NOISE = 0.15  # measurement noise, in pIC50 units
+# the drift of week 11: a new chemist's aminopyrimidines carry only these larger, greasier groups
+DRIFT_WEEK, DRIFT_CHEMIST = 11, "EF"
+LARGE_GROUPS = ["c8ccccc8", "c8ccc(F)cc8", "C8CCOCC8", "N8CCCC8", "C(C)C", "OC(F)(F)F", "Br"]
 
 
 def monday(week: int) -> date:
@@ -170,7 +173,39 @@ class Lab:
                         "registered_week": week,
                     }
                 )
-        return pd.DataFrame(rows)
+        return self._drift(pd.DataFrame(rows), seen)
+
+    def _drift(self, compounds: pd.DataFrame, seen: set[int]) -> pd.DataFrame:
+        """From DRIFT_WEEK, a new chemist makes the aminopyrimidines with larger, greasier groups.
+
+        A separate random generator chooses the new substituents, so every draw of the main one
+        (and with it every other compound and measurement) is the same as without the drift.
+
+        Args:
+            compounds: The registered compounds.
+            seen: The chemlib indices already used.
+
+        Returns:
+            The compounds, with the drifted ones changed.
+        """
+        rng = np.random.default_rng(self.seed + 1011)
+        large = [chemlib.SUBSTITUENTS.index(s) for s in LARGE_GROUPS]
+        n_sub = len(chemlib.SUBSTITUENTS)
+        drifted = (compounds["registered_week"] >= DRIFT_WEEK) & (compounds["series"] == SERIES[11])
+        for row in compounds.index[drifted]:
+            while True:
+                picks = rng.choice(large, size=4)
+                index = chemlib.first_index(11) + sum(
+                    int(p) * n_sub**slot for slot, p in enumerate(picks)
+                )
+                if index not in seen:
+                    seen.add(index)
+                    break
+            compounds.loc[row, ["chemlib_index", "parent_smiles", "chemist"]] = [
+                index, chemlib.smiles_at(index), DRIFT_CHEMIST,
+            ]  # fmt: skip
+            compounds.loc[row, "vendor"] = chemlib.VENDORS[index % len(chemlib.VENDORS)]
+        return compounds
 
     def true_pic50(self, compound_id: str, target: str) -> float:
         """The true pIC50 of a registered compound on a target (what the measurements estimate).
@@ -248,6 +283,7 @@ class Lab:
             (7, "re-registration", f"{fixed}'s structure is corrected in the registry", 6),
             (8, "corrected plate", "plate P08-01 is re-read; its corrected results replace the first ones", 6),
             (10, "late file", "week 10's assay file arrives a week late, with week 11's", 8),
+            (11, "drift", f"a new chemist, {DRIFT_CHEMIST}, makes larger, greasier aminopyrimidines", 8),
         ]  # fmt: skip
         return pd.DataFrame(rows, columns=["week", "kind", "what", "module"])
 

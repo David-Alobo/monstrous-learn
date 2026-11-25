@@ -6,7 +6,9 @@ with typed as (
            replicate::integer      as replicate,
            relation,
            value::double           as value,
-           coalesce(unit, units)   as unit,  -- 'units' was renamed 'unit' in week 5
+           -- 'units' was renamed 'unit' in week 5
+           {% if 'unit' in columns %}coalesce(unit, units){% else %}units{% endif %}
+                                   as unit,
            -- 'status' arrived in week 8: superseded, corrected or final
            {% if 'status' in columns %}coalesce(status, 'final'){% else %}'final'{% endif %}
                                    as status,

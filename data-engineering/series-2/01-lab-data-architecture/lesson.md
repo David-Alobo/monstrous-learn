@@ -146,6 +146,7 @@ print(lab.events.to_string(index=False))
     7 re-registration                       LAB-0042's structure is corrected in the registry       6
     8 corrected plate   plate P08-01 is re-read; its corrected results replace the first ones       6
    10       late file                week 10's assay file arrives a week late, with week 11's       8
+   11           drift              a new chemist, EF, makes larger, greasier aminopyrimidines       8
 ```
 
 The last column says which module of this series deals with each problem. Three of them happen in
