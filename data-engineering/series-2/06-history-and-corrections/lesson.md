@@ -106,6 +106,8 @@ dimension** (SCD) types. The three that matter in practice:
   is added, valid from that date. Every version is kept, and a question can be asked "as of" any
   date.
 
+![LAB-0042 over the twelve weeks: with type 1 (dim_compound) the corrected structure of week 7 replaces the wrong one and nothing records what was shown before; with type 2 (dim_compound_history) version 1 is kept, valid from 14 September to 19 October, and version 2 is valid from 19 October; LAB-0042's measurements, in weeks 3 and 4, were all made under version 1](figures/history-types.svg)
+
 A lab needs type 1 for its everyday questions (structure-activity work uses the true structure) and
 type 2 for its record (what did we believe, and when?). We keep both: `dim_compound` stays current,
 and a new `dim_compound_history` keeps every version.
@@ -505,6 +507,8 @@ where r.load_id > (select max(load_id) from "lab"."marts"."fact_measurement")
             True                               assay_2026-11-02.csv       144
 readings before the build: 1032
 ```
+
+![Week 9's build of fact_measurement: a full rebuild reads loads 1 to 9 again and rewrites all 1,176 rows; the incremental build reads only load 9, the 144 new rows, and merges them](figures/incremental.svg)
 
 The build took only the rows of the newest load, week 9's file, and merged them into the table;
 weeks 1 to 8 were not read again. Incremental models come with a duty, though. A change to the

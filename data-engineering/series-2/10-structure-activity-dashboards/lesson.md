@@ -38,6 +38,8 @@ build (the job of the `publish` task of [Module 7](../07-orchestration/)) can be
 `COPY FROM DATABASE` copies every schema and table of one database into another, which `ATTACH`
 has opened alongside it.
 
+![One writer, many readers: the weekly pipeline writes work/lab.duckdb, which is locked while it is written; after each good build it is copied to published/lab.duckdb, which the Streamlit dashboard opens read-only for any number of chemists](figures/publish.svg)
+
 The app is written to `work/dashboard.py`, part by part: `add` appends a part to the file. `AppTest` comes from Streamlit's testing tools. The logging filter hides one
 warning Streamlit prints, with the time, whenever an app runs outside a browser session, which is
 exactly what a test does.

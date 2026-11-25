@@ -120,6 +120,8 @@ print(db.sql("""
      656                656
 ```
 
+![The grain: on plate P02-01, LAB-0007 was measured on EGFR in two wells, and each well becomes one row of fact_measurement (R-00013 at 842 nM and R-00014 at 703 nM, with plate and replicate kept); averaging to one row per compound and target would lose the plates for good](figures/grain.svg)
+
 Every result is one compound, one target, one plate, one replicate. If two rows had shared those
 four, the grain would be wrong (or the data would hold a duplicate) and we would have to find out
 which before going on.
@@ -410,6 +412,8 @@ print(db.sql("""
 pyrimidine piperazines        98         314.0              222.0        6.65
                  ureas        86         589.0              330.0        6.48
 ```
+
+![EGFR IC50 by series, two ways: the plain mean of the IC50s (562, 314 and 589 nM for the aminopyrimidines, pyrimidine piperazines and ureas) against the geometric mean from the mean pIC50 (206, 222 and 330 nM); by the plain mean the piperazines look best, by the geometric mean the aminopyrimidines are](figures/potency-means.svg)
 
 The plain mean of the IC50s is larger than the geometric mean in every series, nearly three
 times larger for the aminopyrimidines: a handful of weak compounds decide it. Worse, it changes

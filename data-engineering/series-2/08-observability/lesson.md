@@ -436,6 +436,8 @@ WARNING send alerts: drift: clogp moved +1.2 SD from the baseline, most in the a
 INFO week 12: 1 alerts
 ```
 
+![Which checks raised an alert, weeks 5 to 12: schema in week 5; registrations in week 7; volume and schema in week 8; freshness and volume in week 10; volume and four drift alerts in week 11; one drift alert in week 12; weeks 6 and 9 quiet](figures/alerts-by-week.svg)
+
 Every planted problem was reported, in the week it happened, and the quiet weeks stayed quiet:
 
 - **Week 5**: the plate reader's software update (`units` renamed `unit`, a new `operator`
@@ -471,6 +473,8 @@ week           5    6     7     8     9     10    11    12
 name                                                      
 drift_clogp -0.34  0.0 -0.04 -0.14  0.14 -0.16  1.46  1.18
 ```
+
+![The drift of cLogP, molecular weight and heavy atoms against weeks 1 to 4, by week: all three stay between about -0.5 and +0.4 until week 10, then jump above the alert line at 1.0 in week 11 (cLogP +1.46) and stay near it in week 12](figures/drift.svg)
 
 The cLogP drift stays near zero for six weeks and jumps in week 11. Whether that is a problem is
 for a chemist to say (EF may have been asked to make greasier compounds), but now a chemist is the

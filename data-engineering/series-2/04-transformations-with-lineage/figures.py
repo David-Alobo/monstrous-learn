@@ -10,7 +10,11 @@ course site builds without running anything.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parents[1]))  # the series folder, for diagrams
+from diagrams import ORANGE, Diagram
 
 # the course's colours (the same as Series 1's figurekit)
 INK, VIOLET, CYAN, MUTED = "#1d2130", "#7c5cf0", "#0e9fb5", "#8b91a1"
@@ -57,8 +61,12 @@ def _xy(name: str) -> tuple[float, float]:
     return LEFT + col * COL, TOP + row * ROW
 
 
-def lineage() -> str:
-    """The lineage graph, left to right."""
+def lineage(rebuilt: frozenset[str] = frozenset()) -> str:
+    """The lineage graph, left to right.
+
+    Args:
+        rebuilt: Models to outline in orange (what a selection rebuilds); the others are faded.
+    """
     w, h = LEFT * 2 + 4 * COL + BOX_W, TOP + 5.2 * ROW + 60
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}">',
@@ -76,6 +84,12 @@ def lineage() -> str:
     for name, (_, _, kind) in NODES.items():
         x, y = _xy(name)
         fill, stroke, text, _ = STYLE[kind]
+        if rebuilt and name in rebuilt:
+            stroke = ORANGE
+            parts.append(f'<rect x="{x - 5}" y="{y - 5}" width="{BOX_W + 10}" height="{BOX_H + 10}" '
+                         f'rx="11" fill="none" stroke="{ORANGE}" stroke-width="3"/>')  # fmt: skip
+        elif rebuilt:
+            parts.append('<g opacity="0.35">')
         dash = ' stroke-dasharray="5 3"' if kind == "source" else ""
         parts.append(
             f'<rect x="{x}" y="{y}" width="{BOX_W}" height="{BOX_H}" rx="8" fill="{fill}" '
@@ -83,6 +97,8 @@ def lineage() -> str:
             f'<text x="{x + BOX_W / 2}" y="{y + 23}" {FONT} font-size="13" fill="{text}" '
             f'text-anchor="middle">{name}</text>'
         )
+        if rebuilt and name not in rebuilt:
+            parts.append("</g>")
     # the key, along the bottom
     for k, kind in enumerate(STYLE):
         fill, stroke, _, caption = STYLE[kind]
@@ -96,10 +112,38 @@ def lineage() -> str:
     return "".join(parts) + "</svg>"
 
 
+def compile_model() -> Diagram:
+    """What dbt does with one model: fill in the Jinja, wrap it by materialization, run it."""
+    d = Diagram(960, 300)
+    d.text(20, 30, "What dbt does with a model", 16, weight="600")
+    d.box(20, 60, 270, 170, "models/staging/stg_results.sql", [
+        "select ... value * u.factor ...", "from {{ source('raw', 'assay') }}",
+        "left join {{ ref('unit_to_nm') }} as u", "", "only a SELECT: no CREATE,",
+        "no table names",
+    ], kind="tool", size=13)  # fmt: skip
+    d.box(345, 60, 280, 170, "compiled (target/compiled/)", [
+        "select ... value * u.factor ...", 'from "lab"."raw"."assay"',
+        'left join "lab"."staging"."unit_to_nm" as u', "", "ref and source become the",
+        "tables' full names",
+    ], kind="stage", size=13)  # fmt: skip
+    d.box(680, 60, 260, 170, "run in DuckDB", [
+        'create or replace view "lab"."staging".', '"stg_results" as (', "  ... the compiled SELECT ...",
+        ")", "", "materialization: view (staging),", "table (marts)",
+    ], kind="mart", size=13)  # fmt: skip
+    d.arrow((290, 145), (345, 145), "compile")
+    d.arrow((625, 145), (680, 145), "wrap, run")
+    d.text(20, 270, "Every ref() is also an edge of the lineage graph: it is how dbt knows to build "
+           "unit_to_nm before stg_results.", 12, MUTED)  # fmt: skip
+    return d
+
+
 def main() -> None:
-    """Write the figure."""
+    """Write the figures."""
     OUT.mkdir(exist_ok=True)
     (OUT / "lineage.svg").write_text(lineage(), encoding="utf-8")
+    rebuilt = frozenset({"stg_results", "fact_measurement", "measurements_wide"})
+    (OUT / "lineage-selection.svg").write_text(lineage(rebuilt), encoding="utf-8")
+    compile_model().save(OUT / "compile.svg")
 
 
 if __name__ == "__main__":

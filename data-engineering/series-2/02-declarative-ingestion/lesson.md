@@ -122,6 +122,8 @@ Each run goes through three steps: **extract** (call the resources and collect t
 and **load** (write them to the destination). When something goes wrong, dlt says which step
 failed, which section 4 uses.
 
+![One dlt load: the inbox's files feed two resources you declare (the registry, replaced on each load; the assay files, incremental on file name and merged on result_id); dlt extracts, normalizes against the schema it infers, and loads into DuckDB's raw layer; the state keeps the last file loaded, so the next run reads only newer files](figures/dlt-load.svg)
+
 ## 2. A snapshot: the compound registry
 
 The registry export is a snapshot: each week's file holds every compound so far. So each load
@@ -335,6 +337,8 @@ load, week 4 with both its own file and the resent copy of week 3's. Week 5 stop
 **normalize** step, the one that fits rows to the schema, with a message that says exactly which
 column broke which rule. Nobody's analysis is touched until a person decides what the change
 means.
+
+![Week 5 under two contracts: with evolve, every week loads and the new columns unit and operator are added; with freeze, weeks 2 to 4 load, week 5 stops at normalize because unit is not allowed, and week 6 waits until a person decides](figures/schema-contracts.svg)
 
 Stopping is only half of it: the pipeline must also recover cleanly. dlt keeps the failed load as
 a **pending package** (the rows it extracted, waiting to be loaded), and its state already says

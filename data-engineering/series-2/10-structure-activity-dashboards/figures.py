@@ -27,6 +27,9 @@ from pathlib import Path
 
 from websockets.asyncio.client import connect
 
+sys.path.insert(0, str(Path(__file__).parents[1]))  # the series folder, for diagrams
+from diagrams import MUTED, Diagram
+
 HERE = Path(__file__).parent
 OUT = HERE / "figures" / "dashboard.png"
 APP_PORT, CHROME_PORT = 8599, 9333
@@ -114,8 +117,33 @@ async def screenshot(page_ws: str) -> bytes:
     return base64.b64decode(shot["data"])
 
 
+def publish_diagram() -> Diagram:
+    """Why the dashboard reads a published copy: one writer, any number of readers."""
+    d = Diagram(960, 280)
+    d.text(
+        20, 30, "One writer, many readers: the dashboard reads a published copy", 16, weight="600"
+    )
+    d.box(20, 80, 190, 90, "weekly pipeline", ["dlt and dbt write", "while they run"], kind="stage")
+    d.box(280, 80, 200, 90, "work/lab.duckdb", ["the working warehouse:", "locked while written"],
+          kind="plain", size=13)  # fmt: skip
+    d.box(560, 80, 200, 90, "published/lab.duckdb", ["a copy, made after", "each good build"],
+          kind="mart", size=13)  # fmt: skip
+    for k, name in enumerate(["chemist 1", "chemist 2", "chemist 3"]):
+        d.box(820, 50 + k * 55, 120, 42, name, [], kind="tool", size=12)
+        d.arrow((760, 125), (820, 71 + k * 55))
+    d.arrow((210, 125), (280, 125), "write")
+    d.arrow((480, 125), (560, 125), "copy (publish)")
+    d.text(820, 225, "Streamlit, read-only", 12, MUTED)
+    d.text(20, 220, "DuckDB lets one program write a file at a time, and nobody else open it then; "
+           "the copy can be read at any time,", 12, MUTED)  # fmt: skip
+    d.text(20, 238, "and a failed build never reaches it: the dashboard keeps the last good data.",
+           12, MUTED)  # fmt: skip
+    return d
+
+
 def main() -> None:
     """Start the app and Chrome, screenshot the app, stop both."""
+    publish_diagram().save(HERE / "figures" / "publish.svg")
     app = subprocess.Popen(
         [sys.executable, "-m", "streamlit", "run", "work/dashboard.py", "--server.headless",
          "true", "--server.port", str(APP_PORT), "--browser.gatherUsageStats", "false"],

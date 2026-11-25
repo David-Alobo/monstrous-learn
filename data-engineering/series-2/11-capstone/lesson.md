@@ -96,6 +96,8 @@ Around the flow sit two things that do not run every week: the CI of Module 9, w
 change to the dbt project before it is merged, and the dashboard of Module 10, which reads the
 published copy.
 
+![The lab's data stack: inside Prefect's weekly flow (Module 7), the lab's files are loaded by dlt (Module 2) into the DuckDB warehouse (raw, snapshots, staging and marts built and tested by dbt, monitoring: Modules 1 to 8), checked (Modules 5 and 8) and published (Module 10) for the Streamlit dashboard the chemists read; alerts go to a chat; CI (Module 9) checks every change to the dbt project; the hand-over (Module 11) is the dbt docs, a runbook and backups of the snapshots](figures/stack.svg)
+
 ## 2. The settings
 
 Everything a run can change is in one place, `stack.Settings`, with a default for each. Its values

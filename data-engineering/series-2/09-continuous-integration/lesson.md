@@ -27,6 +27,8 @@ three questions for every pull request:
 2. Which models does the change touch, directly or downstream?
 3. How do those models' contents differ from `main`'s?
 
+![Continuous integration for the warehouse: a pull request's branch and main are each built on eight weeks of test data in a warehouse of their own; CI then answers three questions (do the tests pass, what does the change touch, how do the contents differ) in report.md; if it passed a person reviews and merges, if it failed branch protection blocks the merge](figures/ci-flow.svg)
+
 By the end of this module you will be able to:
 
 - build a disposable copy of the warehouse from test data, without touching the real one;

@@ -149,6 +149,8 @@ print(lab.events.to_string(index=False))
    11           drift              a new chemist, EF, makes larger, greasier aminopyrimidines       8
 ```
 
+![The lab's twelve weeks: forty compounds registered every week, and from week 2 the results measured each week (80 to 192 rows); orange markers show the planted problems: unit spellings and the resent file (Module 2), the schema change (Module 2), the re-registration and the corrected plate (Module 6), the late file and the drift (Module 8)](figures/lab-timeline.svg)
+
 The last column says which module of this series deals with each problem. Three of them happen in
 the six weeks we have: unit spellings from week 2, a file sent twice in week 4, and a renamed
 column in week 5.

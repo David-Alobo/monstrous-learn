@@ -297,6 +297,8 @@ left join "lab"."staging"."unit_to_nm" as u using (unit)
 name), the schema and the table. Write `ref` and `source`, never the table name: they are how dbt
 learns the order and the lineage.
 
+![What dbt does with a model: the file stg_results.sql holds only a SELECT, with source() and ref() in place of table names; dbt compiles it, turning each into the table's full name ("lab"."raw"."assay", "lab"."staging"."unit_to_nm"), then wraps it in the statement its materialization needs (create or replace view, for staging) and runs it in DuckDB](figures/compile.svg)
+
 ## 4. The marts
 
 The marts are Module 3's star. The target dimension adds a surrogate key to the seed. The date
@@ -529,6 +531,8 @@ INFO model measurements_wide: success
 Three models were rebuilt, and the dimensions, which the change cannot affect, were left alone. In
 a warehouse with hundreds of models, that is the difference between a rebuild of seconds and one of
 an hour.
+
+![The same lineage, with what dbt build --select stg_results+ rebuilt outlined in orange: stg_results, fact_measurement and measurements_wide; everything else, faded, was left as it was](figures/lineage-selection.svg)
 
 ## 6. Documentation
 

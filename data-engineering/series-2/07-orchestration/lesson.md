@@ -253,6 +253,8 @@ def weekly(week: int) -> dict:
     return summary
 ```
 
+![The weekly flow: receive (retried after a second if the share fails), load with dlt, snapshot and build with dbt, check the chemistry (warnings only), draw the new compounds (cached: the same inputs return the earlier result) and publish; if the build fails, the flow stops there and the dashboards keep last week's data; Prefect records every run, and starts the flow on a schedule or when files arrive](figures/weekly-flow.svg)
+
 ## 2. Running it
 
 A flow is called like a function. The first run of the lesson takes a little longer: Prefect

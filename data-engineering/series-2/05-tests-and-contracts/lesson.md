@@ -532,6 +532,8 @@ print(query("SELECT count(*) AS measurements, max(run_date) AS latest FROM marts
           656 2026-10-14
 ```
 
+![Week 8's build: stg_compounds, stg_results and the three dimensions were built; stg_results' grain test failed (plate P08-01 was read twice, so 40 wells have two rows) while its other tests passed; fact_measurement and measurements_wide were skipped and their tests not run, so the marts keep weeks 1 to 6](figures/build-week8.svg)
+
 Stale data with a failing test beside it is a much better state than fresh data that is wrong: the
 chemists can be told the dashboards are paused, and nobody makes a decision on numbers that are
 counted twice. The test's query shows what broke it, and the raw table shows why:
