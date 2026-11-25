@@ -100,6 +100,12 @@ a.course:hover { border-color: var(--violet); transform: translateY(-2px); }
 .aside li { margin: 0.2rem 0; }
 .next { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 2rem; padding-top: 1.4rem; border-top: 1px solid var(--line); }
 .next a { text-decoration: none; font: 600 0.95rem var(--heading); }
+/* a track page's other tracks: small cards, then the way back */
+.other-tracks { margin-top: 2.5rem; padding-top: 1.6rem; border-top: 1px solid var(--line); }
+.other-tracks h2 { font-size: 1.15rem; margin: 0 0 1rem; }
+.other-tracks h3 { margin: 0; font-size: 1.05rem; }
+.other-tracks .back { margin: 1.4rem 0 0; }
+.other-tracks .back a { text-decoration: none; font: 600 0.95rem var(--heading); }
 
 /* ---- the website's footer ---- */
 .site-footer { background: #07080c; color: #8d94a6; font-size: 0.92rem; border-top: 1px solid rgb(255 255 255 / 0.08); margin-top: 2rem; }

@@ -552,8 +552,15 @@ def track_page(cat: dict, i: int) -> str:
         <p>Join the waitlist to hear first when this track opens, and to help shape it: tell us
         what you would most
         like this track to cover.</p></div>"""
-    others = "".join(
-        f'<a href="{url(cat, o)}">{escape(o["title"])} →</a>' for o in cat["tracks"] if o is not t
+    # the other tracks, as small cards: what each is, and when it opens
+    others = "\n".join(
+        f"""        <a class="card course" href="{url(cat, o)}">
+          <div class="row"><h3>{escape(o["title"])}</h3>{status_chip(o)}</div>
+          <p>{escape(o["tagline"])}</p>
+          <span class="go">View the track →</span>
+        </a>"""
+        for o in cat["tracks"]
+        if o is not t
     )
     return f"""    <section class="wrap hero">
       <p class="crumbs"><a href="{cat["base"]}">All courses</a> / {escape(t["short"])}</p>
@@ -567,8 +574,13 @@ def track_page(cat: dict, i: int) -> str:
     <section class="wrap">
       <p>{escape(t["summary"])}</p>
 {inner}
-      <nav class="next" aria-label="Other tracks">
-        <a href="{cat["base"]}">← All courses</a>{others}</nav>
+      <nav class="other-tracks" aria-label="Other tracks">
+        <h2>Other tracks</h2>
+        <div class="grid">
+{others}
+        </div>
+        <p class="back"><a href="{cat["base"]}">← All courses</a></p>
+      </nav>
     </section>
 """
 
