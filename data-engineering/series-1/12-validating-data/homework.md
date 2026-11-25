@@ -32,7 +32,29 @@ everyone can check theirs against the answers published after the cohort's deadl
 5. *(Builds on section 5, the optional timing.)* Repeat the timing of section 5 with the batch
    repeated 10, 40 and 100 times (change `BENCHMARK_COPIES`, or the `40` in your own copy of the
    code). How does the time per row change for each route as the table grows, and why?
-6. **To think about** *(no code; builds on section 4, "Stop the batch, or let it through?")*: the
+6. *(Builds on section 2, "Letting a library check the units"; optional, like that part.)* A
+   supplier reports three IC50 values as a mass per volume: paracetamol
+   (`CC(=O)Nc1ccc(O)cc1`), 1.5 µg/mL; caffeine (`Cn1cnc2c1c(=O)n(C)c(=O)n2C`), 250 ng/mL; and
+   diphenhydramine supplied as its hydrochloride salt (`CN(C)CCOC(c1ccccc1)c1ccccc1.Cl`), 2 µg/mL.
+   Use pint and RDKit, as the lesson does, to give each value in nM and as a pIC50. For
+   diphenhydramine, work it out twice: with the molecular weight of the salt as written, and with
+   that of the parent molecule alone (drop the `.Cl`). How far apart are the two pIC50 values, and
+   which one is right if the 2 µg/mL was weighed out as the salt? Finally, what does
+   `is_concentration` say for a units column that holds `ng/mL`, and what would you do with such
+   rows in a pipeline that expects molar units?
+7. *(Builds on section 2, "Letting a library check the units"; optional.)* A lab notebook records
+   reaction times typed by different people: `1min`, `1 min`, `1 minute`, `1minute`, `1mins`,
+   `1minutes`, `1 Min`, `1m`, `~1 min`, `1-2 min`, `90 s` and `1h30`. Read each with
+   `ureg.Quantity(text)` (inside `try`/`except`, as `is_concentration` does) and convert it to
+   seconds. Which become 60 seconds? Which fail with an error, and which are read *wrongly without
+   an error* (check what pint thinks `1 Min` and `1m` are, and what happens to the `~`)? Then write
+   a function `to_seconds(text)` that returns the time in seconds, or `None` with the reason, by:
+   trimming and lower-casing the text (and say why lower-casing is safe here but would be wrong for
+   a concentration column); refusing text that starts with `~`, `<` or `>` (that belongs in its own
+   column, like ChEMBL's `standard_relation`); applying a small written table of local shorthand
+   (for example `1h30` meaning 90 minutes); checking that the result is a time; and refusing
+   anything over 7 days. Show the result for every string above.
+8. **To think about** *(no code; builds on section 4, "Stop the batch, or let it through?")*: the
    lesson quarantines a row that fails any check, and stops a batch when more than 5% of rows fail.
    For a nightly load of new ChEMBL activities into a team's database, which checks would you treat
    as "quarantine the row", which as "stop the batch", and which as "load it but warn"? What would

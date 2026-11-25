@@ -1,7 +1,7 @@
 ---
 title: Validating data: records with Pydantic, tables with Pandera
 summary: Write down what a table of activity data must contain, check single records at the edges with Pydantic and whole batches with Pandera, and quarantine what fails with the reason why.
-requires: rdkit, pydantic, pandera, pandas, numpy, duckdb
+requires: rdkit, pydantic, pandera, pandas, numpy, duckdb, pint
 ---
 
 [Module 6](../06-validating-molecules/) checked molecules. This module checks everything that
@@ -80,8 +80,10 @@ import duckdb
 import numpy as np
 import pandas as pd
 import pandera.pandas as pa
+import pint
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 from rdkit import Chem, RDLogger
+from rdkit.Chem import Descriptors
 
 import chemlib
 
@@ -442,6 +444,132 @@ In a project this test lives in a test file and runs with pytest (a program that
 every test) on every change, as in Module 7. `math.isclose` is used because `0.05 * 1000` is not
 exactly `50` in floating point, the way computers store decimal numbers, which rounds them very
 slightly.
+
+### Letting a library check the units
+
+*This part is optional. The rest of the module keeps the table of spellings and `NM_PER_UNIT`
+above; here we see what a units library adds, and what it cannot do for us.*
+
+Our table knows three units, and every line of it can be read and checked. A **units library**
+knows thousands, and something more useful: what each unit *measures*. That is its
+**dimension**. A nanomolar is an amount of substance per volume, a microgram per millilitre is a
+mass per volume, and a nanometre is a length. Values can only be converted between units of the
+same dimension. The best-known library for Python is **pint**. `ureg` (short for unit registry)
+holds every unit pint knows, and `ureg.Unit("uM")` reads a spelling. Here pint reads the spellings
+from earlier, plus two more:
+
+```python
+ureg = pint.UnitRegistry()
+for spelling in ["nM", "uM", "µM", "μM", "pM", "nm", "ug/mL"]:
+    unit = ureg.Unit(spelling)
+    code = spelling.encode("unicode_escape").decode()
+    print(f"{code:>10} -> {unit!s:22} measures {unit.dimensionality}")
+```
+```output
+        nM -> nanomolar              measures [substance] / [length] ** 3
+        uM -> micromolar             measures [substance] / [length] ** 3
+     \xb5M -> micromolar             measures [substance] / [length] ** 3
+   \u03bcM -> micromolar             measures [substance] / [length] ** 3
+        pM -> picomolar              measures [substance] / [length] ** 3
+        nm -> nanometer              measures [length]
+     ug/mL -> microgram / milliliter measures [mass] / [length] ** 3
+```
+
+pint reads `uM`, the micro sign and the Greek mu all as micromolar, which saves us part of the
+table. `[length] ** 3` is a volume, so `[substance] / [length] ** 3` is amount per volume: a molar
+concentration. But look at `nm`: pint reads it as a **nanometre**, a length, because that is what
+the letters mean. Our table maps `nm` to `nM` because *we decided* that a supplier who writes `nm`
+in a concentration column means nanomolar. A library reads exactly what is written; deciding what
+a supplier meant stays a written, versioned decision of ours.
+
+What the library adds is a check that cannot be fooled by spelling: converting between units of
+different dimensions is refused, with an error that says why. A **quantity** is a number with its
+unit, made with `ureg.Quantity(value, unit)`, and `.to(...)` converts it:
+
+```python
+print(ureg.Quantity(4.2, "uM").to("nM"))
+try:
+    ureg.Quantity(5, "ug/mL").to("nM")
+except pint.DimensionalityError as error:
+    print("refused:", error)
+```
+```output
+4200.0 nanomolar
+refused: Cannot convert from 'microgram / milliliter' ([mass] / [length] ** 3) to 'nanomolar' ([substance] / [length] ** 3)
+```
+
+Some assays do report potency as a mass per volume, such as µg/mL. Turning grams into moles needs
+the **molecular weight** (grams per mole), and that comes from the structure, which RDKit gives us
+(`Descriptors.MolWt`). pint has a built-in **context** called `"chemistry"` that does the
+conversion once it is given the molecular weight as `mw`. In the formats, `.2f` means two decimal
+places and `~P` writes the unit's short symbol:
+
+```python
+aspirin = Chem.MolFromSmiles("CC(=O)Oc1ccccc1C(=O)O")
+mw = ureg.Quantity(Descriptors.MolWt(aspirin), "g/mol")
+dose = ureg.Quantity(5, "ug/mL")
+in_nm = dose.to("nM", "chemistry", mw=mw)
+print(f"aspirin, {mw:.2f~P}: {dose:~P} is {in_nm:.1f~P}, pIC50 {p_activity(in_nm.magnitude):.2f}")
+```
+```output
+aspirin, 180.16 g/mol: 5 µg/ml is 27753.3 nM, pIC50 4.56
+```
+
+This is also the kind of conversion that goes wrong silently by hand: forget the factor of 1,000
+between millilitres and litres and the answer is still a plausible-looking number. pint keeps
+track of every factor. Even so, the molecular weight must be the right one: that of the compound
+as tested (a salt such as a hydrochloride weighs more than the parent), which is one more reason
+to standardise structures (Module 7) before converting.
+
+Finally, the dimension gives a check that a column holds concentrations at all, whatever the
+spelling. A spelling pint does not know raises an error, and so does a value with a number in it,
+so the function treats both as "no":
+
+```python
+MOLAR = ureg.Unit("M").dimensionality
+
+
+def is_concentration(units: str) -> bool:
+    """Whether pint reads a spelling as an amount per volume (a molar concentration)."""
+    try:
+        return ureg.Unit(units).dimensionality == MOLAR
+    except (pint.PintError, ValueError, TypeError):
+        return False
+
+
+for spelling in ["µM", "umol/L", "nm", "ug/mL", "%", "n/a", "10 nM", ""]:
+    print(f"{spelling!r:>9} -> {is_concentration(spelling)}")
+```
+```output
+     'µM' -> True
+ 'umol/L' -> True
+     'nm' -> False
+  'ug/mL' -> False
+      '%' -> False
+    'n/a' -> False
+  '10 nM' -> False
+       '' -> False
+```
+
+`umol/L` is a concentration (it is the same as µM) even though our contract does not list it: a
+library check answers "is this a concentration?", and the contract answers "is this one of the
+units we agreed?". A pipeline can use both. In section 4's Pandera schema this function could be a
+check on the `units` column, `pa.Check(is_concentration, element_wise=True)`, to report rows whose
+unit is not a concentration at all, before the stricter list of allowed units is applied.
+
+**Which to use?** For a few units that never change, a short table with a test, as above, is
+simple, has no extra package, and is easy to read. When data arrive in many units, in mixed
+dimensions (molar and mass per volume, or temperatures and volumes from lab instruments), a
+library such as pint is safer, because every conversion is checked. Other Python units libraries
+include `astropy.units` and `unyt` (both fast on large NumPy arrays); clinical and laboratory
+systems often write units in **UCUM**, a standard set of unit codes (`umol/L`, `mg/dL`).
+
+The same approach works for any quantity, not only concentrations. Reaction times and
+temperatures typed by hand (`1 min`, `1mins`, `90 s`, `rt`, `o/n` for overnight) are the classic
+case: a library reads most of them, a written list of local shorthand covers the rest, and the
+dimension check catches a slip such as `1m` (a metre, not a minute). Reading lab conditions
+safely into tables is part of Series 3, *Data Pipelines for Digital and Autonomous Chemistry*
+(Module 3, "Reaction and synthesis metadata"; planned). Homework question 7 is a first taste.
 
 ## 3. Test data with known faults
 

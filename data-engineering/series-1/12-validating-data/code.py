@@ -30,8 +30,10 @@ import duckdb
 import numpy as np
 import pandas as pd
 import pandera.pandas as pa
+import pint
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 from rdkit import Chem, RDLogger
+from rdkit.Chem import Descriptors
 
 import chemlib
 
@@ -228,6 +230,36 @@ def test_conversion() -> None:
 
 test_conversion()
 log.info("conversion tests passed")
+
+# ---- Letting a library check the units ----
+ureg = pint.UnitRegistry()
+for spelling in ["nM", "uM", "µM", "μM", "pM", "nm", "ug/mL"]:
+    unit = ureg.Unit(spelling)
+    code = spelling.encode("unicode_escape").decode()
+    print(f"{code:>10} -> {unit!s:22} measures {unit.dimensionality}")
+print(ureg.Quantity(4.2, "uM").to("nM"))
+try:
+    ureg.Quantity(5, "ug/mL").to("nM")
+except pint.DimensionalityError as error:
+    print("refused:", error)
+aspirin = Chem.MolFromSmiles("CC(=O)Oc1ccccc1C(=O)O")
+mw = ureg.Quantity(Descriptors.MolWt(aspirin), "g/mol")
+dose = ureg.Quantity(5, "ug/mL")
+in_nm = dose.to("nM", "chemistry", mw=mw)
+print(f"aspirin, {mw:.2f~P}: {dose:~P} is {in_nm:.1f~P}, pIC50 {p_activity(in_nm.magnitude):.2f}")
+MOLAR = ureg.Unit("M").dimensionality
+
+
+def is_concentration(units: str) -> bool:
+    """Whether pint reads a spelling as an amount per volume (a molar concentration)."""
+    try:
+        return ureg.Unit(units).dimensionality == MOLAR
+    except (pint.PintError, ValueError, TypeError):
+        return False
+
+
+for spelling in ["µM", "umol/L", "nm", "ug/mL", "%", "n/a", "10 nM", ""]:
+    print(f"{spelling!r:>9} -> {is_concentration(spelling)}")
 
 # ---- 3. Test data with known faults ----
 compounds = chemlib.library(N_COMPOUNDS, seed=COMPOUND_SEED)[["id", "smiles"]]

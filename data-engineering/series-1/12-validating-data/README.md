@@ -28,6 +28,6 @@ uv sync
 uv run python 12-validating-data/code.py
 ```
 
-or, in any Python 3.11+ environment: `python -m pip install rdkit pydantic pandera pandas numpy duckdb`.
+or, in any Python 3.11+ environment: `python -m pip install rdkit pydantic pandera pandas numpy duckdb pint`.
 
 *This README, the notebook and `code.py` are made from `lesson.md` by `lessonkit.py --export`; edit the lesson, not them.*

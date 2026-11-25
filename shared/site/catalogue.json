@@ -306,7 +306,7 @@
             {
               "number": 3,
               "title": "Reaction and synthesis metadata",
-              "what": "Relational tables for conditions, building blocks, yields and purity.",
+              "what": "Relational tables for conditions, building blocks, yields and purity, including reading free-text conditions such as reaction times and temperatures with their units.",
               "tools": [
                 "PostgreSQL"
               ]

@@ -10,7 +10,7 @@ What it takes to move data safely between molecular design, robotic synthesis an
 
 1. **From design to make.** Why moving from a virtual library to robotic synthesis is a data problem.
 2. **Checking molecules before synthesis.** An intake check for stereocentres, salts and unstable groups. *RDKit*
-3. **Reaction and synthesis metadata.** Relational tables for conditions, building blocks, yields and purity. *PostgreSQL*
+3. **Reaction and synthesis metadata.** Relational tables for conditions, building blocks, yields and purity, including reading free-text conditions such as reaction times and temperatures with their units. *PostgreSQL*
 4. **Instrument data back into the pipeline.** Parse LC-MS and NMR exports into structured tables to confirm what was made. *mzML*
 5. **Monitoring lab data pipelines.** Catch schema drift, missing readings and corrupted values before they reach a model. *Pandera, Prefect*
 6. **A chemical intake service.** Wrap the checks and structure previews in a small web API. *FastAPI*
