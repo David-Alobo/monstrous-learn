@@ -54,3 +54,15 @@ def test_defects_are_what_they_say(kind):
             assert canon == Chem.MolToSmiles(Chem.MolFromSmiles(original["smiles"].iloc[0]))
     clean = dirty[dirty["defect"] == ""]
     assert all(Chem.MolFromSmiles(s) is not None for s in clean["smiles"])
+
+
+def test_parts_at_rebuilds_every_molecule_and_first_index_starts_each_scaffold():
+    for scaffold in range(len(chemlib.SCAFFOLDS)):
+        start = chemlib.first_index(scaffold)
+        for index in (start, start + 1, start + 777):
+            number, picks = chemlib.parts_at(index)
+            assert number == scaffold
+            assert len(picks) == chemlib.SCAFFOLDS[scaffold].count("{")
+            subs = [chemlib.SUBSTITUENTS[r] for r in picks]
+            assert chemlib._fill(chemlib.SCAFFOLDS[number], subs) == chemlib.smiles_at(index)
+    assert chemlib.first_index(0) == 0

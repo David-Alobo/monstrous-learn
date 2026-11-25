@@ -323,15 +323,62 @@ def helpers(folder: Path, body: str) -> list[tuple[str, str]]:
 
     Returns:
         (module name, download address) for each: the series' helpers (e.g. chemlib) and the
-        module's own files (e.g. workers.py), in that order.
+        module's own files (e.g. workers.py), in that order. Helpers imported by other helpers
+        (labdata imports chemlib) are included, and a helper that is a stub loading a file from
+        shared/ is downloaded from shared/ itself, under the helper's name.
     """
     raw = raw_of(series_of(folder))
-    imported = set(re.findall(r"^\s*(?:from|import) (\w+)", body, re.M))
     tools = ("lessonkit", "figurekit")  # the course's own tooling, not lesson code
-    series = [(n, f"{raw}/{n}.py") for n in sorted(imported)
-              if (folder.parent / f"{n}.py").exists() and n not in tools]  # fmt: skip
-    own = [(n, f"{raw}/{folder.name}/{n}.py") for n in sorted(imported)
-           if (folder / f"{n}.py").exists() and n not in ("code", "figures")]  # fmt: skip
+
+    def imports_in(text: str) -> set[str]:
+        """The top-level module names a piece of code imports.
+
+        Args:
+            text: Python code, or a lesson's Markdown.
+
+        Returns:
+            The names.
+        """
+        return set(re.findall(r"^\s*(?:from|import) (\w+)", text, re.M))
+
+    def source(name: str) -> tuple[str, Path] | None:
+        """Where a helper of this series or module is downloaded from, and its file here.
+
+        Args:
+            name: The module name.
+
+        Returns:
+            (download address, local file), or None if it is not one of the course's files.
+        """
+        if name in tools:
+            return None
+        if (folder / f"{name}.py").exists() and name not in ("code", "figures"):
+            return f"{raw}/{folder.name}/{name}.py", folder / f"{name}.py"
+        path = folder.parent / f"{name}.py"
+        if not path.exists():
+            return None
+        shared = re.search(r'_SHARED = .*"shared" / "(\w+\.py)"', path.read_text(encoding="utf-8"))
+        if shared:
+            return f"{raw_of('shared')}/{shared.group(1)}", REPO_ROOT / "shared" / shared.group(1)
+        return f"{raw}/{name}.py", path
+
+    found: dict[str, tuple[str, Path]] = {}
+    todo = sorted(imports_in(body))
+    while todo:
+        name = todo.pop(0)
+        where = source(name)
+        if where is None or name in found:
+            continue
+        found[name] = where
+        todo += sorted(imports_in(where[1].read_text(encoding="utf-8")) - set(found))
+    series = [
+        (n, url)
+        for n, (url, _) in sorted(found.items())
+        if not url.startswith(f"{raw}/{folder.name}/")
+    ]
+    own = [
+        (n, url) for n, (url, _) in sorted(found.items()) if url.startswith(f"{raw}/{folder.name}/")
+    ]
     return series + own
 
 
