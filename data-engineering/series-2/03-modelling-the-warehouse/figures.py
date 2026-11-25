@@ -26,9 +26,9 @@ TABLES = [
         ("result_id", "PK"), ("compound_key", "FK"), ("target_key", "FK"), ("run_date", "FK"),
         ("plate, replicate", ""), ("relation", ""), ("ic50_nm", ""), ("pic50", ""),
         ("source_file", "")]),
-    ("dim_target", (670, 30), CYAN, [
+    ("dim_target", (670, 130), CYAN, [
         ("target_key", "PK"), ("target", ""), ("chembl_id", ""), ("role", "")]),
-    ("dim_date", (670, 300), CYAN, [
+    ("dim_date", (30, 290), CYAN, [
         ("date_key", "PK"), ("project_week", ""), ("weekday", ""), ("month", "")]),
 ]  # fmt: skip
 
@@ -125,7 +125,7 @@ def _line(x1: float, y1: float, x2: float, y2: float, label: str = "") -> str:
 
 def lab_star() -> str:
     """The lab's star: one fact table, three dimensions, and the date dimension in two roles."""
-    w, h = 900, 470
+    w, h = 900, 450
     place = {name: (left, top) for name, (left, top), _, _ in TABLES}
     fx, fy = place["fact_measurement"]
     cx, cy = place["dim_compound"]
@@ -136,8 +136,14 @@ def lab_star() -> str:
         f'<rect width="{w}" height="{h}" fill="#ffffff"/>',
         _line(cx + WIDTH, _row_y(cy, 0), fx, _row_y(fy, 1)),  # compound_key
         _line(tx, _row_y(ty, 0), fx + WIDTH, _row_y(fy, 2)),  # target_key
-        _line(dx, _row_y(dy, 0), fx + WIDTH, _row_y(fy, 3), "run date"),  # run_date
-        _line(cx + WIDTH, _row_y(cy, 6), dx, _row_y(dy, 0) + 6, "registered on"),
+        _line(fx, _row_y(fy, 3), dx + WIDTH, _row_y(dy, 0)),  # run_date
+        _text(dx + WIDTH + 14, _row_y(dy, 0) + 24, "run date", 12, MUTED),
+        # registered_on: straight down from dim_compound to dim_date
+        (
+            f'<line x1="{cx + 150}" y1="{cy + HEAD + ROW * 8 + 8}" x2="{cx + 150}" y2="{dy}" '
+            f'stroke="{MUTED}" stroke-width="2"/>'
+        ),
+        _text(cx + 158, (cy + HEAD + ROW * 8 + 8 + dy) / 2 + 4, "registered on", 12, MUTED),
     ]
     parts += [_table(name, left, top, colour, cols) for name, (left, top), colour, cols in TABLES]
     parts.append(_text(w / 2, h - 18, "Measurements in the middle; what was measured, on which "

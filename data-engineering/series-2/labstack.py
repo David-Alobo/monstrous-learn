@@ -12,23 +12,33 @@ that code in every lesson, it lives here, written as those modules wrote it:
     with duckdb.connect("work/lab.duckdb") as db:
         labstack.stage(db)                       # Module 1: the staging views, on that raw layer
 
+From Module 5 on, the dbt project of Modules 4 to 6 comes from here too: `dbt_project` copies
+it as a given module left it (from stages/), and `dbt` runs a dbt command on it, as Module 4's
+lesson did.
+
 Read it alongside the lessons it comes from; nothing here is new.
 """
 
 from __future__ import annotations
 
+import logging
 import os
+import shutil
+import time
 from pathlib import Path
 
 import dlt
 import duckdb
 import pandas as pd
+from dbt.cli.main import dbtRunner
+from dlt.pipeline.exceptions import PipelineStepFailed
 
 import labdata
 
 # dlt, quietly: no usage statistics, and only errors on the screen
 os.environ.setdefault("RUNTIME__DLTHUB_TELEMETRY", "false")
 os.environ.setdefault("RUNTIME__LOG_LEVEL", "ERROR")
+os.environ.setdefault("DBT_SEND_ANONYMOUS_USAGE_STATS", "false")  # dbt, likewise
 
 
 def _read(path: Path) -> list[dict]:
@@ -100,8 +110,52 @@ def load_raw(
     registry, assay = sources(inbox)
     for week in range(1, weeks + 1) if isinstance(weeks, int) else weeks:
         lab.write_week(week, inbox)
-        pipeline.run([registry(), assay()])
+        run_patiently(pipeline, lambda: [registry(), assay()])
     return pipeline
+
+
+def run_patiently(pipeline: dlt.Pipeline, data, attempts: int = 5) -> None:
+    """Run a dlt pipeline, trying again if Windows briefly refuses access to one of its files.
+
+    On Windows another program (most often an antivirus scan of a file just written) can hold a
+    file for a moment, and dlt's move of it fails with PermissionError. dlt keeps what it had
+    extracted as a pending package, so the cure is to finish that package (a run with no data) and
+    run again; the incremental cursor stops anything being loaded twice.
+
+    Args:
+        pipeline: The pipeline.
+        data: A function returning what to run (called again for each attempt).
+        attempts: How many times to try.
+
+    Raises:
+        PipelineStepFailed: If the run fails for any other reason, or on the last attempt.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            pipeline.run(data())
+            return
+        except (PipelineStepFailed, PermissionError) as error:
+            if not _windows_lock(error) or attempt == attempts:
+                raise
+            time.sleep(attempt)
+            if pipeline.has_pending_data:
+                try:
+                    pipeline.run()  # finish the package that was interrupted
+                except (PipelineStepFailed, PermissionError) as again:
+                    if not _windows_lock(again):
+                        raise
+
+
+def _windows_lock(error: Exception) -> bool:
+    """Whether a dlt failure was a file briefly held by another program (see run_patiently).
+
+    Args:
+        error: What dlt raised.
+
+    Returns:
+        True for a PermissionError, raised directly or as the cause of a failed step.
+    """
+    return isinstance(error, PermissionError) or isinstance(error.__cause__, PermissionError)
 
 
 def stage(db: duckdb.DuckDBPyConnection) -> None:
@@ -149,3 +203,52 @@ def stage(db: duckdb.DuckDBPyConnection) -> None:
                file_name                           AS source_file
         FROM typed LEFT JOIN staging.unit_to_nm AS u USING (unit)
     """)
+
+
+# ---------------------------------------------------------------- the dbt project (Modules 4-6)
+STAGES = Path(__file__).parent / "stages"  # the project as each module left it
+
+
+def dbt_project(dest: str | Path, after: int) -> Path:
+    """Copy the lab's dbt project as a module left it (stages/after-NN/lab_dbt) into a folder.
+
+    Args:
+        dest: Where to put the project (its folders are made if needed).
+        after: The module whose finished project to copy (4, 5 or 6).
+
+    Returns:
+        The project's folder.
+    """
+    dest = Path(dest)
+    shutil.copytree(STAGES / f"after-{after:02d}" / "lab_dbt", dest, dirs_exist_ok=True)
+    return dest
+
+
+def dbt(project: str | Path, *args: str, log: logging.Logger | None = None):
+    """Run a dbt command on a project, like `dbt <args>` in a terminal, and log what it did.
+
+    Args:
+        project: The project's folder (its profiles.yml is there too).
+        *args: The command and its options, e.g. "build", "--select", "staging".
+        log: Where to log one line per thing built or tested (the root logger if None).
+
+    Returns:
+        What dbt returned: the results of a build, run, seed, test or snapshot; the names of
+        `ls`; the catalogue of `docs generate`.
+
+    Raises:
+        RuntimeError: If anything could not be built (a model's SQL failed, not a test).
+    """
+    log = log or logging.getLogger()
+    result = dbtRunner().invoke(
+        [*args, "--quiet", "--project-dir", str(project), "--profiles-dir", str(project)]
+    )
+    if result.exception:
+        raise result.exception
+    if args[0] in ("build", "run", "seed", "test", "snapshot"):
+        for item in result.result:
+            log.info("%s %s: %s", item.node.resource_type, item.node.name, item.status)
+        broken = [item.node.name for item in result.result if item.status == "error"]
+        if broken:
+            raise RuntimeError(f"dbt could not build {broken}: see {project}/logs/dbt.log")
+    return result.result

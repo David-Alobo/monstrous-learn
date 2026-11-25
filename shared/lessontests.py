@@ -31,6 +31,7 @@ PIP_NAME = {
     "pydantic_settings": "pydantic-settings",
     "pandera_chem": "pandera-chem",
     "dlt": "dlt[duckdb]",
+    "dbt": "dbt-core",
 }
 STDLIB = set(sys.stdlib_module_names)
 

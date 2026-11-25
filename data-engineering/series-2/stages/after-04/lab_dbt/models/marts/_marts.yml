@@ -1,0 +1,24 @@
+models:
+  - name: dim_compound
+    description: One row per compound in the current registry, with its chemical series and
+      properties worked out once with RDKit.
+    columns:
+      - name: compound_key
+        description: The warehouse's key for the compound (a surrogate key).
+      - name: compound_id
+        description: The lab's ID for the compound (the natural key), e.g. LAB-0042.
+      - name: series
+        description: The series whose core the parent contains; empty if none or several, for a
+          person to check.
+      - name: clogp
+        description: Crippen's estimate of the octanol-water partition coefficient (RDKit).
+  - name: fact_measurement
+    description: One row per measurement of one compound on one target, in one well of one plate.
+    columns:
+      - name: relation
+        description: "'=' for a measured value; '>' when the compound was weaker than the highest
+          concentration tested, so ic50_nm is only a bound."
+      - name: pic50
+        description: 9 - log10(ic50_nm). Average potencies as pIC50, over measured values only.
+  - name: measurements_wide
+    description: The star joined once, for dashboards. Built from the star; never edit it.

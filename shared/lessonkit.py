@@ -422,13 +422,18 @@ def export(folder: Path) -> dict[Path, str]:
     # the course's own helpers (chemlib) and this module's (e.g. workers.py) come with the
     # repository; outside it (in Colab), fetch them
     local = helpers(folder, body)
-    # data files the lesson reads from its folder (front matter "files:", e.g. recorded/*.json)
-    data = sorted(
-        p.relative_to(folder).as_posix()
-        for pattern in listed(meta, "files")
-        for p in folder.glob(pattern)
-        if p.is_file()
-    )
+    # data files the lesson reads (front matter "files:"): from its folder (recorded/*.json), or
+    # from the series folder when the pattern starts with ../ (../stages/after-04/**/*); each is
+    # downloaded to the same path relative to the folder it came from, next to the helpers
+    data = []
+    for pattern in listed(meta, "files"):
+        shared = pattern.startswith("../")
+        base = folder.parent if shared else folder
+        for p in base.glob(pattern[3:] if shared else pattern):
+            if p.is_file() and "__pycache__" not in p.parts:
+                rel = p.relative_to(base).as_posix()
+                data.append((rel, f"{raw}/{rel}" if shared else f"{raw}/{folder.name}/{rel}"))
+    data.sort()
     services = listed(meta, "services")
     if services:
         # a cell that needs a database starts with %%needs: it runs where the database is set up
@@ -458,11 +463,11 @@ def export(folder: Path) -> dict[Path, str]:
                 f'if not pathlib.Path("{name}.py").exists():\n'
                 f'    urllib.request.urlretrieve("{url}", "{name}.py")\n'
             )
-        for rel in data:
+        for rel, url in data:
             install += (
                 f'if not pathlib.Path("{rel}").exists():\n'
                 f'    pathlib.Path("{rel}").parent.mkdir(parents=True, exist_ok=True)\n'
-                f'    urllib.request.urlretrieve("{raw}/{folder.name}/{rel}", "{rel}")\n'
+                f'    urllib.request.urlretrieve("{url}", "{rel}")\n'
             )
     cells = [
         md_cell(f"# {title}\n\n{summary}\n\nThe lesson's page: {page}"),

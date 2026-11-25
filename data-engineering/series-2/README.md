@@ -25,7 +25,10 @@ Series 1 built each piece of a chemical data pipeline by hand. Series 2 hands th
 
 ### Transformation
 
-4. **Transformations with lineage.** Turn raw tables into clean ones with SQL models that reference each other; dbt builds them in order, draws the lineage graph and writes the documentation. *dbt*
+4. **[Transformations with lineage](04-transformations-with-lineage/)**. Turn raw tables into clean ones with SQL models that reference each other; dbt builds them in order, draws the lineage graph and writes the documentation. *dbt*
+
+   [Read the lesson](https://monstrous.com.ng/learn/data-engineering/series-2/04-transformations-with-lineage/) · [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/David-Alobo/monstrous-learn/blob/main/data-engineering/series-2/04-transformations-with-lineage/notebook.ipynb)
+
 5. **Tests and contracts in the warehouse.** Check every build: dbt tests for keys, values and relationships, model contracts, and chemistry checks on structures with pandera-chem. *dbt, pandera-chem*
 6. **History and corrections.** Assays are corrected and compounds re-registered: keep every version with snapshots, and rebuild only what changed with incremental models. *dbt*
 

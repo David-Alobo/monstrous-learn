@@ -26,7 +26,7 @@ dev = ["pytest>=8", "ruff>=0.6"]
 line-length = 100
 target-version = "py311"
 # made from each lesson by lessonkit.py --export, in the lesson's own order
-extend-exclude = ["*/code.py", "*/notebook.ipynb", "*.md"]
+extend-exclude = ["*/code.py", "*/notebook.ipynb", "*.md", "stages"]  # stages/: lessons write it
 
 [tool.pytest.ini_options]
 testpaths = ["."]
