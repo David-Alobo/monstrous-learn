@@ -247,7 +247,7 @@
             {
               "part": "Foundations",
               "title": "Modelling the warehouse",
-              "what": "Compounds, assays, targets and measurements as a star schema in DuckDB: facts and dimensions, keys, and why analysts and dashboards need this shape.",
+              "what": "Compounds, targets, dates and measurements as a star schema in DuckDB: the grain, dimensions that work out chemistry once, keys the database enforces, which potencies can be averaged, and why analysts and dashboards need this shape.",
               "tools": [
                 "DuckDB"
               ],

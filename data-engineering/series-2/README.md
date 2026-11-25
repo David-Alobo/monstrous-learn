@@ -18,7 +18,10 @@ Series 1 built each piece of a chemical data pipeline by hand. Series 2 hands th
 
    [Read the lesson](https://monstrous.com.ng/learn/data-engineering/series-2/02-declarative-ingestion/) · [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/David-Alobo/monstrous-learn/blob/main/data-engineering/series-2/02-declarative-ingestion/notebook.ipynb)
 
-3. **Modelling the warehouse.** Compounds, assays, targets and measurements as a star schema in DuckDB: facts and dimensions, keys, and why analysts and dashboards need this shape. *DuckDB*
+3. **[Modelling the warehouse](03-modelling-the-warehouse/)**. Compounds, targets, dates and measurements as a star schema in DuckDB: the grain, dimensions that work out chemistry once, keys the database enforces, which potencies can be averaged, and why analysts and dashboards need this shape. *DuckDB*
+
+   [Read the lesson](https://monstrous.com.ng/learn/data-engineering/series-2/03-modelling-the-warehouse/) · [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/David-Alobo/monstrous-learn/blob/main/data-engineering/series-2/03-modelling-the-warehouse/notebook.ipynb)
+
 
 ### Transformation
 

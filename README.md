@@ -83,6 +83,7 @@ pipeline you could run in production:
 |---|---|---|
 | 1 | [Designing a lab data architecture](data-engineering/series-2/01-lab-data-architecture/) | [Read the lesson](https://monstrous.com.ng/learn/data-engineering/series-2/01-lab-data-architecture/) · [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/David-Alobo/monstrous-learn/blob/main/data-engineering/series-2/01-lab-data-architecture/notebook.ipynb) |
 | 2 | [Declarative ingestion](data-engineering/series-2/02-declarative-ingestion/) | [Read the lesson](https://monstrous.com.ng/learn/data-engineering/series-2/02-declarative-ingestion/) · [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/David-Alobo/monstrous-learn/blob/main/data-engineering/series-2/02-declarative-ingestion/notebook.ipynb) |
+| 3 | [Modelling the warehouse](data-engineering/series-2/03-modelling-the-warehouse/) | [Read the lesson](https://monstrous.com.ng/learn/data-engineering/series-2/03-modelling-the-warehouse/) · [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/David-Alobo/monstrous-learn/blob/main/data-engineering/series-2/03-modelling-the-warehouse/notebook.ipynb) |
 
 <!-- modules:end -->
 
