@@ -140,7 +140,8 @@ def load_inbox(inbox: str | Path, pipeline: dlt.Pipeline) -> dict[str, int]:
     run_patiently(pipeline, lambda: [registry(), assay()])
     info = pipeline.last_trace.last_normalize_info
     counts = info.row_counts if info else {}
-    return {table: n for table, n in counts.items() if not table.startswith("_dlt")}
+    # sorted by table: dlt's own order can change from run to run
+    return {table: n for table, n in sorted(counts.items()) if not table.startswith("_dlt")}
 
 
 def warehouse_at(

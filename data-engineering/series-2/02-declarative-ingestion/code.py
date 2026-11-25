@@ -101,7 +101,8 @@ def rows_loaded(pipeline: dlt.Pipeline) -> dict[str, int]:
     """How many rows each table received in the pipeline's last run (dlt's own tables left out)."""
     info = pipeline.last_trace.last_normalize_info
     counts = info.row_counts if info else {}
-    return {table: n for table, n in counts.items() if not table.startswith("_dlt")}
+    # sorted by table: dlt's own order can change from run to run
+    return {table: n for table, n in sorted(counts.items()) if not table.startswith("_dlt")}
 
 
 for week in range(1, WEEKS + 1):

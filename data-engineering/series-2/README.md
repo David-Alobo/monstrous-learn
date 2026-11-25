@@ -48,7 +48,10 @@ Series 1 built each piece of a chemical data pipeline by hand. Series 2 hands th
 
    [Read the lesson](https://monstrous.com.ng/learn/data-engineering/series-2/08-observability/) · [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/David-Alobo/monstrous-learn/blob/main/data-engineering/series-2/08-observability/notebook.ipynb)
 
-9. **Continuous integration for data.** Test every change before it reaches the warehouse: dbt builds and checks on each pull request, in GitHub Actions. *GitHub Actions, dbt*
+9. **[Continuous integration for data](09-continuous-integration/)**. Test every change before it reaches the warehouse: dbt builds and checks on each pull request, in GitHub Actions. *GitHub Actions, dbt*
+
+   [Read the lesson](https://monstrous.com.ng/learn/data-engineering/series-2/09-continuous-integration/) · [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/David-Alobo/monstrous-learn/blob/main/data-engineering/series-2/09-continuous-integration/notebook.ipynb)
+
 
 ### Serving
 
