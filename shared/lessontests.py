@@ -30,6 +30,7 @@ PIP_NAME = {
     "openbabel": "openbabel-wheel",
     "pydantic_settings": "pydantic-settings",
     "pandera_chem": "pandera-chem",
+    "dlt": "dlt[duckdb]",
 }
 STDLIB = set(sys.stdlib_module_names)
 

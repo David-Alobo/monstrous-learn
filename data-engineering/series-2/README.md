@@ -14,7 +14,10 @@ Series 1 built each piece of a chemical data pipeline by hand. Series 2 hands th
 
    [Read the lesson](https://monstrous.com.ng/learn/data-engineering/series-2/01-lab-data-architecture/) · [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/David-Alobo/monstrous-learn/blob/main/data-engineering/series-2/01-lab-data-architecture/notebook.ipynb)
 
-2. **Declarative ingestion.** Load ChEMBL's API and a lab's instrument exports with a few lines of configuration: schema inference, schema changes, incremental state and retries handled by the tool, compared with Series 1's hand-written loader. *dlt*
+2. **[Declarative ingestion](02-declarative-ingestion/)**. Load the lab's instrument files and ChEMBL's API by declaring what to load, not how: schema inference, incremental loading, duplicates absorbed by a primary key, and schema changes followed or refused by a contract, compared with Series 1's hand-written loader. *dlt*
+
+   [Read the lesson](https://monstrous.com.ng/learn/data-engineering/series-2/02-declarative-ingestion/) · [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/David-Alobo/monstrous-learn/blob/main/data-engineering/series-2/02-declarative-ingestion/notebook.ipynb)
+
 3. **Modelling the warehouse.** Compounds, assays, targets and measurements as a star schema in DuckDB: facts and dimensions, keys, and why analysts and dashboards need this shape. *DuckDB*
 
 ### Transformation

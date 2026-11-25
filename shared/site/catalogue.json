@@ -238,7 +238,7 @@
             {
               "part": "Foundations",
               "title": "Declarative ingestion",
-              "what": "Load ChEMBL's API and a lab's instrument exports with a few lines of configuration: schema inference, schema changes, incremental state and retries handled by the tool, compared with Series 1's hand-written loader.",
+              "what": "Load the lab's instrument files and ChEMBL's API by declaring what to load, not how: schema inference, incremental loading, duplicates absorbed by a primary key, and schema changes followed or refused by a contract, compared with Series 1's hand-written loader.",
               "tools": [
                 "dlt"
               ],
