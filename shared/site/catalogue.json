@@ -284,7 +284,7 @@
             {
               "part": "Operations",
               "title": "Orchestration",
-              "what": "Run the whole pipeline as a flow: tasks, retries, caching, schedules, and runs triggered when new data arrives.",
+              "what": "Run the lab's weekly pipeline as a flow: tasks, retries for the failures that pass, caching, a failed build that stops before publishing, the record of every run, schedules, and the ways new data can start a run.",
               "tools": [
                 "Prefect"
               ],

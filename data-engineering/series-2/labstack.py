@@ -101,17 +101,77 @@ def load_raw(
     Returns:
         The pipeline, so a lesson can carry on loading later weeks.
     """
-    pipeline = dlt.pipeline(
+    pipeline = lab_pipeline(warehouse, pipelines)
+    for week in range(1, weeks + 1) if isinstance(weeks, int) else weeks:
+        lab.write_week(week, inbox)
+        load_inbox(inbox, pipeline)
+    return pipeline
+
+
+def lab_pipeline(warehouse: str | Path, pipelines: str | Path) -> dlt.Pipeline:
+    """Module 2's dlt pipeline into the raw layer (it carries on from what it loaded before).
+
+    Args:
+        warehouse: The DuckDB database file.
+        pipelines: dlt's own folder (what it has loaded, and its schema).
+
+    Returns:
+        The pipeline.
+    """
+    return dlt.pipeline(
         pipeline_name="lab",
         destination=dlt.destinations.duckdb(str(warehouse)),
         dataset_name="raw",
         pipelines_dir=str(pipelines),
     )
+
+
+def load_inbox(inbox: str | Path, pipeline: dlt.Pipeline) -> dict[str, int]:
+    """Load whatever is new in the inbox into the raw layer (Module 2's resources).
+
+    Args:
+        inbox: The folder the lab's files arrive in.
+        pipeline: The pipeline (from lab_pipeline).
+
+    Returns:
+        How many rows each of the lab's tables received (empty if nothing was new).
+    """
     registry, assay = sources(inbox)
-    for week in range(1, weeks + 1) if isinstance(weeks, int) else weeks:
-        lab.write_week(week, inbox)
-        run_patiently(pipeline, lambda: [registry(), assay()])
-    return pipeline
+    run_patiently(pipeline, lambda: [registry(), assay()])
+    info = pipeline.last_trace.last_normalize_info
+    counts = info.row_counts if info else {}
+    return {table: n for table, n in counts.items() if not table.startswith("_dlt")}
+
+
+def warehouse_at(lab: labdata.Lab, week: int, work: str | Path) -> Path:
+    """The lab's warehouse as Module 6 left it, at the end of a week, built from nothing.
+
+    Each week from 1 is loaded and snapshotted in turn (the snapshot keeps the registry's
+    history), then the dbt project is built once. Everything goes in `work`: the inbox, the
+    database lab.duckdb, dlt's folder dlt/ and the dbt project lab_dbt/.
+
+    Args:
+        lab: The lab.
+        week: The last week to load.
+        work: The working folder (the dbt profile expects work/lab.duckdb, relative to where
+            the code runs, unless LAB_WAREHOUSE says otherwise).
+
+    Returns:
+        The dbt project's folder.
+    """
+    work = Path(work)
+    project = dbt_project(work / "lab_dbt", after=6)
+    pipeline = lab_pipeline(work / "lab.duckdb", work / "dlt")
+    for each in range(1, week + 1):
+        lab.write_week(each, work / "inbox")
+        load_inbox(work / "inbox", pipeline)
+        dbt(project, "snapshot", log=_SILENT)
+    dbt(project, "build", log=_SILENT)
+    return project
+
+
+_SILENT = logging.getLogger("labstack.silent")  # catching up is not worth a line per model
+_SILENT.propagate = False
 
 
 def run_patiently(pipeline: dlt.Pipeline, data, attempts: int = 5) -> None:
@@ -237,7 +297,7 @@ def dbt(project: str | Path, *args: str, log: logging.Logger | None = None):
         `ls`; the catalogue of `docs generate`.
 
     Raises:
-        RuntimeError: If anything could not be built (a model's SQL or its contract failed; a
+        BuildError: If anything could not be built (a model's SQL or its contract failed; a
             failing test is logged, not raised), with dbt's reason for each.
     """
     log = log or logging.getLogger()
@@ -252,8 +312,35 @@ def dbt(project: str | Path, *args: str, log: logging.Logger | None = None):
     if args[0] in ("build", "run", "seed", "test", "snapshot"):
         for item in result.result:
             log.info("%s %s: %s", item.node.resource_type, item.node.name, item.status)
-        broken = [item for item in result.result if item.status == "error"]
+        broken = {
+            item.node.name: item.message.replace("\\", "/")  # the same paths on every system
+            for item in result.result
+            if item.status == "error"
+        }
         if broken:
-            reasons = "\n".join(f"{item.node.name}: {item.message}" for item in broken)
-            raise RuntimeError(f"dbt could not build:\n{reasons}")
+            raise BuildError(broken)
     return result.result
+
+
+class BuildError(RuntimeError):
+    """dbt could not build one or more models: their names, with dbt's reason for each."""
+
+    def __init__(self, reasons: dict[str, str]) -> None:
+        """Keep dbt's full reasons, and a one-line summary of them.
+
+        Args:
+            reasons: dbt's message for each model it could not build.
+        """
+        self.reasons = reasons
+        full = "\n".join(f"{name}: {message}" for name, message in reasons.items())
+        super().__init__(f"dbt could not build:\n{full}")
+
+    @property
+    def short(self) -> str:
+        """One line: each model, with the first line of dbt's reason after its heading."""
+
+        def first(message: str) -> str:
+            lines = [line.strip() for line in message.splitlines()[1:] if line.strip()]
+            return lines[0] if lines else message.strip()
+
+        return "; ".join(f"{name}: {first(message)}" for name, message in self.reasons.items())

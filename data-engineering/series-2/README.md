@@ -40,7 +40,10 @@ Series 1 built each piece of a chemical data pipeline by hand. Series 2 hands th
 
 ### Operations
 
-7. **Orchestration.** Run the whole pipeline as a flow: tasks, retries, caching, schedules, and runs triggered when new data arrives. *Prefect*
+7. **[Orchestration](07-orchestration/)**. Run the lab's weekly pipeline as a flow: tasks, retries for the failures that pass, caching, a failed build that stops before publishing, the record of every run, schedules, and the ways new data can start a run. *Prefect*
+
+   [Read the lesson](https://monstrous.com.ng/learn/data-engineering/series-2/07-orchestration/) · [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/David-Alobo/monstrous-learn/blob/main/data-engineering/series-2/07-orchestration/notebook.ipynb)
+
 8. **Observability.** Know when something is wrong before the chemists do: freshness, row counts, schema changes and drift in molecular properties, with alerts. *Prefect, dbt*
 9. **Continuous integration for data.** Test every change before it reaches the warehouse: dbt builds and checks on each pull request, in GitHub Actions. *GitHub Actions, dbt*
 
