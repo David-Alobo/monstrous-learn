@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1126" height="206" viewBox="0 0 1126 206">
+<rect width="1126" height="206" fill="#ffffff"/>
+<defs><marker id="head" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#1d2130"/></marker></defs>
+<rect x="20" y="30" width="150" height="92" rx="12" fill="#ffffff" stroke="#8b91a1" stroke-width="2.5"/>
+<text x="95.0" y="60" font-family="sans-serif" font-size="16" fill="#8b91a1" text-anchor="middle" font-weight="bold">Inbox</text>
+<text x="95.0" y="84" font-family="sans-serif" font-size="12" fill="#1d2130" text-anchor="middle" font-weight="normal">the lab's files,</text>
+<text x="95.0" y="101" font-family="sans-serif" font-size="12" fill="#1d2130" text-anchor="middle" font-weight="normal">as they arrive</text>
+<line x1="174" y1="76.0" x2="250" y2="76.0" stroke="#1d2130" stroke-width="2" marker-end="url(#head)"/>
+<text x="212.0" y="67.0" font-family="sans-serif" font-size="12" fill="#1d2130" text-anchor="middle" font-weight="normal">load</text>
+<text x="212.0" y="96.0" font-family="sans-serif" font-size="11" fill="#8b91a1" text-anchor="middle" font-weight="normal">dlt, M2</text>
+<rect x="254" y="30" width="150" height="92" rx="12" fill="#ffffff" stroke="#7c5cf0" stroke-width="2.5"/>
+<text x="329.0" y="60" font-family="sans-serif" font-size="16" fill="#7c5cf0" text-anchor="middle" font-weight="bold">Raw</text>
+<text x="329.0" y="84" font-family="sans-serif" font-size="12" fill="#1d2130" text-anchor="middle" font-weight="normal">every file, unchanged,</text>
+<text x="329.0" y="101" font-family="sans-serif" font-size="12" fill="#1d2130" text-anchor="middle" font-weight="normal">with where it came from</text>
+<line x1="408" y1="76.0" x2="484" y2="76.0" stroke="#1d2130" stroke-width="2" marker-end="url(#head)"/>
+<text x="446.0" y="67.0" font-family="sans-serif" font-size="12" fill="#1d2130" text-anchor="middle" font-weight="normal">clean</text>
+<text x="446.0" y="96.0" font-family="sans-serif" font-size="11" fill="#8b91a1" text-anchor="middle" font-weight="normal">dbt, M4-6</text>
+<rect x="488" y="30" width="150" height="92" rx="12" fill="#ffffff" stroke="#7c5cf0" stroke-width="2.5"/>
+<text x="563.0" y="60" font-family="sans-serif" font-size="16" fill="#7c5cf0" text-anchor="middle" font-weight="bold">Staging</text>
+<text x="563.0" y="84" font-family="sans-serif" font-size="12" fill="#1d2130" text-anchor="middle" font-weight="normal">typed, one name per</text>
+<text x="563.0" y="101" font-family="sans-serif" font-size="12" fill="#1d2130" text-anchor="middle" font-weight="normal">column, no duplicates</text>
+<line x1="642" y1="76.0" x2="718" y2="76.0" stroke="#1d2130" stroke-width="2" marker-end="url(#head)"/>
+<text x="680.0" y="67.0" font-family="sans-serif" font-size="12" fill="#1d2130" text-anchor="middle" font-weight="normal">shape</text>
+<text x="680.0" y="96.0" font-family="sans-serif" font-size="11" fill="#8b91a1" text-anchor="middle" font-weight="normal">dbt, M3-4</text>
+<rect x="722" y="30" width="150" height="92" rx="12" fill="#ffffff" stroke="#7c5cf0" stroke-width="2.5"/>
+<text x="797.0" y="60" font-family="sans-serif" font-size="16" fill="#7c5cf0" text-anchor="middle" font-weight="bold">Marts</text>
+<text x="797.0" y="84" font-family="sans-serif" font-size="12" fill="#1d2130" text-anchor="middle" font-weight="normal">shaped for the</text>
+<text x="797.0" y="101" font-family="sans-serif" font-size="12" fill="#1d2130" text-anchor="middle" font-weight="normal">chemists' questions</text>
+<line x1="876" y1="76.0" x2="952" y2="76.0" stroke="#1d2130" stroke-width="2" marker-end="url(#head)"/>
+<text x="914.0" y="67.0" font-family="sans-serif" font-size="12" fill="#1d2130" text-anchor="middle" font-weight="normal">serve</text>
+<text x="914.0" y="96.0" font-family="sans-serif" font-size="11" fill="#8b91a1" text-anchor="middle" font-weight="normal">M10</text>
+<rect x="956" y="30" width="150" height="92" rx="12" fill="#ffffff" stroke="#0e9fb5" stroke-width="2.5"/>
+<text x="1031.0" y="60" font-family="sans-serif" font-size="16" fill="#0e9fb5" text-anchor="middle" font-weight="bold">Readers</text>
+<text x="1031.0" y="84" font-family="sans-serif" font-size="12" fill="#1d2130" text-anchor="middle" font-weight="normal">dashboards, models,</text>
+<text x="1031.0" y="101" font-family="sans-serif" font-size="12" fill="#1d2130" text-anchor="middle" font-weight="normal">reports</text>
+<rect x="20" y="152" width="1086" height="18" rx="9" fill="#0e9fb5" fill-opacity="0.12"/>
+<text x="563.0" y="165" font-family="sans-serif" font-size="12" fill="#0e9fb5" text-anchor="middle" font-weight="normal">run every week, with retries: Prefect (M7)</text>
+<rect x="20" y="176" width="1086" height="18" rx="9" fill="#7c5cf0" fill-opacity="0.12"/>
+<text x="563.0" y="189" font-family="sans-serif" font-size="12" fill="#7c5cf0" text-anchor="middle" font-weight="normal">tests, history, observability and CI at every step (M5, M6, M8, M9)</text>
+</svg>
