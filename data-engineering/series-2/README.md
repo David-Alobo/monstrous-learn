@@ -62,7 +62,10 @@ Series 1 built each piece of a chemical data pipeline by hand. Series 2 hands th
 
 ### Capstone
 
-11. **Capstone: a running data stack for a small lab.** Ingest, model, test, schedule, monitor and serve one lab's chemistry data end to end, and hand it over with its documentation. *Everything above*
+11. **[Capstone: a running data stack for a small lab](11-capstone/)**. Ingest, model, test, schedule, monitor and serve one lab's chemistry data end to end, and hand it over with its documentation. *Everything above*
+
+   [Read the lesson](https://monstrous.com.ng/learn/data-engineering/series-2/11-capstone/) · [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/David-Alobo/monstrous-learn/blob/main/data-engineering/series-2/11-capstone/notebook.ipynb)
+
 
 Each module folder holds the lesson (`lesson.md`), a notebook, the code on its own
 and the homework. New to notebooks?
