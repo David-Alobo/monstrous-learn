@@ -158,7 +158,7 @@ def icon(name: str) -> str:
 
 
 def status_chip(item: dict) -> str:
-    """The status of a track or course as a chip: when it opens, "Planned" or "Coming later".
+    """A track or course's status as a chip: when it opens, "Open", "Planned" or "Coming later".
 
     Args:
         item: A track or a course from the catalogue.
@@ -168,6 +168,8 @@ def status_chip(item: dict) -> str:
     """
     if item["status"] in ("Planned", "Coming later"):
         return f'<span class="chip planned">{escape(item["status"])}</span>'
+    if item["status"] == "Open":  # every module can be read now; no cohort date yet
+        return '<span class="chip status">Open to read</span>'
     return f'<span class="chip status">Starts {escape(item["status"])}</span>'
 
 
@@ -627,6 +629,9 @@ def course(cat: dict, i: int, k: int) -> str:
     cadence = (
         "This course is planned: the outline may change. Join the waitlist to hear when it opens."
         if planned
+        else "Every module is open now: you can read and run them today, on your own. A cohort "
+        "date will be announced; join the waitlist to hear when."
+        if s["status"] == "Open"
         else f"The cohort starts in {escape(s['status'])}, with one module a week. The modules "
         "already written are open now: you can start reading and running them today, on your own."
     )
@@ -1052,7 +1057,7 @@ def readme(cat: dict, t: dict, s: dict) -> str:
     Returns:
         The README text.
     """
-    status = s["status"] if s["status"] == "Planned" else f"opens {s['status']}"
+    status = {"Planned": "Planned", "Open": "Open to read"}.get(s["status"], f"opens {s['status']}")
     lines = [
         f"# Series {s['number']}: {s['title']}",
         "",

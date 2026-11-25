@@ -2,7 +2,7 @@
 
 Track: Data Engineering for Chemistry. The industry tools that run chemical data pipelines: ingestion, warehousing, transformation, testing, orchestration and dashboards.
 
-**Status:** Planned · **Level:** After Series 1 · **[Read it online](https://monstrous.com.ng/learn/data-engineering/series-2/)**
+**Status:** Open to read · **Level:** After Series 1 · **[Read it online](https://monstrous.com.ng/learn/data-engineering/series-2/)**
 
 Series 1 built each piece of a chemical data pipeline by hand. Series 2 hands those pieces to the open-source tools data teams use in industry, one by one: declarative ingestion with dlt, a DuckDB warehouse modelled for compounds and assays, transformations, tests and history with dbt, orchestration with Prefect, observability, continuous integration, and structure-activity dashboards in Streamlit. Every module says which Series 1 module it replaces, and everything runs in the browser as well as on your own computer.
 
