@@ -82,8 +82,8 @@ section.wrap { padding-top: 3.2rem; padding-bottom: 3.2rem; }
 a.course { text-decoration: none; color: inherit; transition: border-color .15s, transform .15s; }
 a.course:hover { border-color: var(--violet); transform: translateY(-2px); }
 .course .num { font: 700 2.4rem/1 var(--heading); color: var(--violet); }
-.course .small { font: 500 0.8rem var(--mono); color: var(--ink-3); }
-.course .go { margin-top: auto; padding-top: 0.6rem; font: 600 0.92rem var(--heading); color: var(--violet); }
+.course .small { margin-top: auto; min-height: 2.6em; font: 500 0.8rem/1.3 var(--mono); color: var(--ink-3); }  /* at the bottom, room for two lines: lines up across cards */
+.course .go { padding-top: 0.6rem; font: 600 0.92rem var(--heading); color: var(--violet); }
 .course .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: space-between; }
 
 /* ---- a course's modules ---- */
@@ -127,6 +127,7 @@ a.course:hover { border-color: var(--violet); transform: translateY(-2px); }
   .module { grid-template-columns: 2.4rem 1fr; }
   .module .when { grid-column: 2; }
   .site-footer .foot { grid-template-columns: 1fr 1fr; }
+  .course .small { min-height: 0; }  /* cards stacked: nothing to line up with */
 }
 /* a course's parts: a heading over each group of modules */
 .modules .part { font: 500 0.78rem var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--violet); margin: 1rem 0 -0.2rem; }
