@@ -55,7 +55,10 @@ Series 1 built each piece of a chemical data pipeline by hand. Series 2 hands th
 
 ### Serving
 
-10. **Structure-activity dashboards.** Give medicinal chemists interactive views of their series: structures, potencies and trends, served from the warehouse. *Streamlit*
+10. **[Structure-activity dashboards](10-structure-activity-dashboards/)**. Give medicinal chemists interactive views of their series: structures, potencies and trends, served from the warehouse. *Streamlit*
+
+   [Read the lesson](https://monstrous.com.ng/learn/data-engineering/series-2/10-structure-activity-dashboards/) · [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/David-Alobo/monstrous-learn/blob/main/data-engineering/series-2/10-structure-activity-dashboards/notebook.ipynb)
+
 
 ### Capstone
 
